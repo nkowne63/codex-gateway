@@ -61,6 +61,50 @@ describe("AuthRefreshCoordinator", () => {
 		});
 	});
 
+	it("queues a forced refresh behind a weak read and returns the refreshed token", async () => {
+		const storage = createStorage();
+		const oldAuth = {
+			tokens: { access_token: "old", refresh_token: "refresh", account_id: "account-a" },
+			lastRefresh: new Date().toISOString(),
+			expiresAt: null
+		};
+		storage.values.set("credential", { generation: 1, fingerprint: "old", auth: oldAuth });
+		let releaseRead!: () => void;
+		const readGate = new Promise<void>((resolve) => (releaseRead = resolve));
+		storage.get.mockImplementationOnce(async () => {
+			await readGate;
+			return storage.values.get("credential");
+		});
+		const state = {
+			storage,
+			blockConcurrencyWhile: vi.fn(async (operation: () => Promise<unknown>) => operation())
+		} as unknown as DurableObjectState;
+		const env = { CHATGPT_LOCAL_CLIENT_ID: "client-id" } as unknown as Env;
+		const fetchMock = vi.fn(async () => new Response(JSON.stringify({ access_token: "new" })));
+		vi.stubGlobal("fetch", fetchMock);
+		const coordinator = new AuthRefreshCoordinator(state, env);
+
+		const weakRead = coordinator.fetch(
+			new Request("https://internal/refresh", {
+				method: "POST",
+				body: JSON.stringify({ operation: "get", now: Date.now(), force: false, source: oldAuth })
+			})
+		);
+		await Promise.resolve();
+		const forcedRefresh = coordinator.fetch(
+			new Request("https://internal/refresh", {
+				method: "POST",
+				body: JSON.stringify({ operation: "refresh", now: Date.now(), force: true, source: oldAuth })
+			})
+		);
+		releaseRead();
+
+		await weakRead;
+		const response = await forcedRefresh;
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(await response.json()).toMatchObject({ access_token: "new", generation: 2 });
+	});
+
 	it("does not commit a refresh result when the durable generation changed", async () => {
 		const storage = createStorage();
 		const oldAuth = {

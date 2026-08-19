@@ -17,7 +17,11 @@ export type RefreshCoordinationRequest = {
 };
 export type DurableCredential = { generation: number; fingerprint: string; auth: StoredAuth };
 
-const refreshesInFlight = new Map<string, Promise<DurableCredential | null>>();
+type InFlightOperation = {
+	operation: "get" | "fresh" | "refresh";
+	promise: Promise<DurableCredential | null>;
+};
+const refreshesInFlight = new Map<string, InFlightOperation>();
 type JwtClaims = { "https://api.openai.com/auth"?: { chatgpt_account_id?: string } } & Record<string, unknown>;
 
 export function logRefresh(account: string, errorClass: string, status?: number): void {
@@ -199,7 +203,11 @@ async function coordinate(
 ): Promise<DurableCredential | null> {
 	const accountKey = await accountKeyFor(source.tokens);
 	const active = refreshesInFlight.get(accountKey);
-	if (active) return active;
+	if (active) {
+		if (operation !== "refresh" || active.operation === "refresh") return active.promise;
+		await active.promise;
+		return coordinate(env, source, now, operation);
+	}
 	const promise = (async () => {
 		if (env.AUTH_REFRESH_COORDINATOR) {
 			const stub = env.AUTH_REFRESH_COORDINATOR.get(env.AUTH_REFRESH_COORDINATOR.idFromName(accountKey));
@@ -228,11 +236,12 @@ async function coordinate(
 		await projectToKv(env, updated, now);
 		return { generation: 2, fingerprint: authFingerprint(updated), auth: updated };
 	})();
-	refreshesInFlight.set(accountKey, promise);
+	const inFlight = { operation, promise };
+	refreshesInFlight.set(accountKey, inFlight);
 	try {
 		return await promise;
 	} finally {
-		if (refreshesInFlight.get(accountKey) === promise) refreshesInFlight.delete(accountKey);
+		if (refreshesInFlight.get(accountKey) === inFlight) refreshesInFlight.delete(accountKey);
 	}
 }
 
