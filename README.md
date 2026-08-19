@@ -242,14 +242,15 @@ The service will be available at `http://localhost:8787`
 |----------|---------|-------------|
 | `OLLAMA_API_URL` | `http://localhost:11434` | Ollama instance URL for local model integration |
 | `DEBUG_MODEL` | - | Override model for debugging purposes |
+| `MODEL_ID_MAP` | - | JSON object mapping OS-facing model IDs to Codex backend IDs, e.g. `{"homelab-codex":"gpt-5-codex"}` |
 | `VERBOSE` | `false` | Enable detailed debug logging |
 
 #### Authentication Security
 
-- When `OPENAI_API_KEY` is set, all `/v1/*` and `/api/*` endpoints require authentication
+- `OPENAI_API_KEY` is required; all `/v1/*` and `/api/*` endpoints require authentication
 - Clients must include the header: `Authorization: Bearer <your-api-key>`
 - Recommended format: `sk-` followed by a random string (e.g., `sk-1234567890abcdef...`)
-- Without this variable, endpoints are publicly accessible (not recommended for production)
+- Missing, malformed, and incorrect credentials all receive the same `401 Unauthorized` response
 
 #### OAuth Token Management
 
@@ -296,6 +297,21 @@ Content-Type: application/json
   "stream": true
 }
 ```
+
+#### Responses
+```http
+POST /v1/responses
+Authorization: Bearer sk-your-api-key-here
+Content-Type: application/json
+
+{
+  "model": "homelab-codex",
+  "input": "Explain prompt caching",
+  "stream": true
+}
+```
+
+`MODEL_ID_MAP` selects the backend Codex model for OS-facing IDs. The gateway preserves Responses tool definitions, tool-call input/output items, and `data:image/*;base64,...` images. It never returns OAuth credentials or upstream error details to clients.
 
 #### Advanced Reasoning
 Enable enhanced reasoning capabilities:

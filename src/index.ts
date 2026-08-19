@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import openai from "./routes/openai"; // Import the openai router
 import ollama from "./routes/ollama"; // Import the ollama router
+import responses from "./routes/responses";
 export { AuthRefreshCoordinator } from "./auth_refresh_coordinator";
 
 const app = new Hono();
@@ -23,6 +24,7 @@ app.get("/", (c) => c.json({ status: "ok" }));
 app.get("/health", (c) => c.json({ status: "ok" }));
 
 app.route("/", openai); // Mount the OpenAI routes under /v1
+app.route("/", responses);
 app.route("/api", ollama); // Mount the Ollama routes under /api
 
 export default app;

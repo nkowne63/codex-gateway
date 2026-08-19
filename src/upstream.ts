@@ -1,6 +1,7 @@
 import { normalizeModelName } from "./utils";
 import { AuthStore } from "./auth_store";
 import { getInstructionsForModel } from "./instructions";
+import { stablePromptCacheKey } from "./cache_key";
 import { Env, InputItem, Tool } from "./types"; // Import types
 
 type ReasoningParam = {
@@ -25,13 +26,6 @@ function logUpstreamError(status: number | "fetch-failed", requestUrl: string, m
 	console.error(`Upstream request failed status=${status} url=${safeUpstreamLocation(requestUrl)} ${metadata}`);
 }
 
-async function generateSessionId(instructions: string | undefined, inputItems: InputItem[]): Promise<string> {
-	const content = `${instructions || ""}|${JSON.stringify(inputItems)}`;
-	const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
-	const hashArray = Array.from(new Uint8Array(hashBuffer));
-	return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 export async function startUpstreamRequest(
 	env: Env, // Pass the environment object
 	model: string,
@@ -44,6 +38,7 @@ export async function startUpstreamRequest(
 		reasoningParam?: ReasoningParam;
 		ollamaPath?: string; // Added for Ollama specific paths
 		ollamaPayload?: OllamaPayload; // Added for Ollama specific payloads
+		promptCacheKey?: string;
 	}
 ): Promise<{ response: Response | null; error: Response | null }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
@@ -76,7 +71,7 @@ export async function startUpstreamRequest(
 		? `${env.OLLAMA_API_URL}${options?.ollamaPath}` // Assuming OLLAMA_API_URL is in Env
 		: env.CHATGPT_RESPONSES_URL;
 
-	const sessionId = isOllamaRequest ? undefined : await generateSessionId(instructions, inputItems);
+	const sessionId = isOllamaRequest ? undefined : options?.promptCacheKey || (await stablePromptCacheKey(undefined, instructions || model));
 
 	const baseInstructions = await getInstructionsForModel(model);
 

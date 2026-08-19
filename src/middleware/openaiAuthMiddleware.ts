@@ -8,25 +8,11 @@ import { Env } from "../types";
 export function openaiAuthMiddleware() {
 	return async (c: Context<{ Bindings: Env }>, next: Next) => {
 		const authHeader = c.req.header("Authorization");
-
-		if (!authHeader) {
-			return c.json({ error: { message: "Missing Authorization header" } }, 401);
-		}
-
-		if (!authHeader.startsWith("Bearer ")) {
-			return c.json({ error: { message: "Invalid Authorization header format. Expected: Bearer <token>" } }, 401);
-		}
-
-		const providedKey = authHeader.substring(7); // Remove "Bearer " prefix
 		const configuredKey = c.env.OPENAI_API_KEY;
-
-		if (!configuredKey) {
-			await next();
+		const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
+		if (!configuredKey || !providedKey || providedKey !== configuredKey) {
+			return c.json({ error: { message: "Unauthorized" } }, 401);
 		}
-
-		if (providedKey !== configuredKey) {
-			return c.json({ error: { message: "Invalid API key" } }, 401);
-		}
-		await next();
+		return next();
 	};
 }

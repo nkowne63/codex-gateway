@@ -17,6 +17,47 @@ interface SseEvent {
 	delta?: string;
 }
 
+export async function sseTranslateResponses(upstreamResponse: Response): Promise<ReadableStream> {
+	const reader = upstreamResponse.body?.getReader();
+	if (!reader) throw new Error("Upstream response body is not readable.");
+	return new ReadableStream({
+		async start(controller) {
+			const decoder = new TextDecoder();
+			const encoder = new TextEncoder();
+			let buffer = "";
+			try {
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					buffer += decoder.decode(value, { stream: true });
+					const lines = buffer.split("\n");
+					buffer = lines.pop() || "";
+					for (const line of lines) {
+						if (!line.startsWith("data: ")) continue;
+						const data = line.slice(6).trim();
+						if (!data || data === "[DONE]") {
+							controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+							continue;
+						}
+						try {
+							const event = JSON.parse(data);
+							if (event.type === "response.failed") event.response = { ...event.response, error: { message: "Upstream request failed" } };
+							controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+						} catch {
+							controller.enqueue(encoder.encode('data: {"type":"error","error":{"message":"Upstream request failed"}}\n\n'));
+						}
+					}
+				}
+			} catch {
+				controller.enqueue(encoder.encode('data: {"type":"error","error":{"message":"Upstream request failed"}}\n\n'));
+			} finally {
+				reader.releaseLock();
+				controller.close();
+			}
+		}
+	});
+}
+
 export async function sseTranslateChat(
 	upstreamResponse: Response,
 	model: string,
