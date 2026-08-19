@@ -150,6 +150,45 @@ describe("Codex auth store", () => {
 		expect(second.accessToken).toBe("refreshed-access-token");
 	});
 
+	it("reloads rotated credentials before a forced refresh queued behind a weak fresh operation", async () => {
+		const now = Date.parse("2026-08-19T03:04:05.000Z");
+		const kv = createKv({
+			auth_tokens: JSON.stringify(fallbackTokens),
+			auth_last_refresh: new Date(0).toISOString(),
+			auth_expires_at: new Date(0).toISOString()
+		});
+		let releaseWeakRefresh!: () => void;
+		const weakRefreshGate = new Promise<void>((resolve) => (releaseWeakRefresh = resolve));
+		let weakRefreshStarted!: () => void;
+		const weakRefreshStart = new Promise<void>((resolve) => (weakRefreshStarted = resolve));
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body)) as { refresh_token: string };
+			if (body.refresh_token === "fallback-refresh-token") {
+				weakRefreshStarted();
+				await weakRefreshGate;
+				return new Response(
+					JSON.stringify({ access_token: "weak-access-token", refresh_token: "rotated-refresh-token" })
+				);
+			}
+			expect(body.refresh_token).toBe("rotated-refresh-token");
+			return new Response(JSON.stringify({ access_token: "forced-access-token", refresh_token: "forced-refresh-token" }));
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		const env = createEnv(kv);
+
+		const weakFresh = AuthStore.getFresh(env, now);
+		await weakRefreshStart;
+		const forcedRefresh = AuthStore.refresh(env, now + 1);
+		releaseWeakRefresh();
+
+		await expect(weakFresh).resolves.toMatchObject({ accessToken: "weak-access-token" });
+		await expect(forcedRefresh).resolves.toMatchObject({
+			accessToken: "forced-access-token",
+			tokens: { refresh_token: "forced-refresh-token" }
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
 	it("isolates same-isolate refresh coalescing by account", async () => {
 		const firstKv = createKv({
 			auth_tokens: JSON.stringify({ ...fallbackTokens, account_id: "account-a", refresh_token: "refresh-a" }),

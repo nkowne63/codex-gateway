@@ -206,7 +206,8 @@ async function coordinate(
 	if (active) {
 		if (operation !== "refresh" || active.operation === "refresh") return active.promise;
 		await active.promise;
-		return coordinate(env, source, now, operation);
+		const current = await loadBootstrap(env, now, false);
+		return current ? coordinate(env, current, now, operation) : null;
 	}
 	const promise = (async () => {
 		if (env.AUTH_REFRESH_COORDINATOR) {
