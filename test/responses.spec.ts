@@ -67,6 +67,41 @@ describe("Responses endpoint", () => {
 		);
 	});
 
+	it("passes the complete parsed request body to upstream construction", async () => {
+		startUpstreamRequest.mockResolvedValueOnce({
+			response: new Response(
+				'data: {"type":"response.completed","response":{"id":"resp","object":"response","status":"completed","output":[]}}\n\n'
+			),
+			error: null
+		});
+		const payload = {
+			input: "hello",
+			previous_response_id: "resp_previous",
+			metadata: { trace: "safe" },
+			max_output_tokens: 123,
+			truncation: "auto",
+			include: ["web_search_call.action.sources"],
+			store: true,
+			service_tier: "priority"
+		};
+
+		await responses.fetch(
+			new Request("https://gateway.test/v1/responses", {
+				method: "POST",
+				headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+				body: JSON.stringify(payload)
+			}),
+			env
+		);
+
+		expect(startUpstreamRequest).toHaveBeenLastCalledWith(
+			env,
+			expect.any(String),
+			expect.any(Array),
+			expect.objectContaining({ responsesPayload: payload })
+		);
+	});
+
 	it("keeps one explicit conversation identity across a previous-response chain", async () => {
 		startUpstreamRequest.mockResolvedValue({
 			response: new Response(
@@ -118,6 +153,7 @@ describe("Responses endpoint", () => {
 			output: [{ type: "message", content: [] }],
 			usage: { input_tokens: 3 },
 			metadata: { trace: "safe" },
+			incomplete_details: { reason: "max_output_tokens", nested: { access_token: "nested-secret" } },
 			error: { message: "Bearer oauth-secret", code: "token-secret" }
 		};
 		startUpstreamRequest.mockResolvedValueOnce({
@@ -142,6 +178,8 @@ describe("Responses endpoint", () => {
 		});
 		expect(JSON.stringify(body)).not.toContain("oauth-secret");
 		expect(JSON.stringify(body)).not.toContain("token-secret");
+		expect(JSON.stringify(body)).not.toContain("nested-secret");
+		expect(body.incomplete_details).toEqual({ reason: "max_output_tokens", nested: {} });
 	});
 
 	it("rejects deltas without an authoritative terminal response", async () => {

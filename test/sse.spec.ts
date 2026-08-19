@@ -15,6 +15,56 @@ describe("SSE redaction and framing", () => {
 			expect(body).not.toContain(secret);
 	});
 
+	it("deep-redacts every Responses event while preserving safe protocol data", async () => {
+		const event = {
+			type: "response.completed",
+			response: {
+				id: "resp_safe",
+				status: "incomplete",
+				incomplete_details: { reason: "max_output_tokens" },
+				usage: { input_tokens: 4, output_tokens: 8 },
+				metadata: {
+					trace: "safe",
+					nested: {
+						access_token: "nested-access-secret",
+						refreshToken: "camel-refresh-secret",
+						"x-api-key": "hyphen-api-secret",
+						note: "Bearer embedded-secret"
+					}
+				},
+				output: [{ type: "message", content: [{ type: "output_text", text: "safe output" }] }],
+				diagnostics: { authorization: "Bearer auth-secret", raw_error: "upstream leaked jwt.secret.value" }
+			}
+		};
+		const body = await new Response(
+			await sseTranslateResponses(new Response(`data: ${JSON.stringify(event)}\n\n`))
+		).text();
+		const sanitized = JSON.parse(body.match(/^data: (.+)$/m)![1]);
+
+		expect(sanitized).toMatchObject({
+			type: "response.completed",
+			response: {
+				id: "resp_safe",
+				status: "incomplete",
+				incomplete_details: { reason: "max_output_tokens" },
+				usage: { input_tokens: 4, output_tokens: 8 },
+				metadata: { trace: "safe" },
+				output: event.response.output
+			}
+		});
+		expect(sanitized.response.metadata.nested).not.toHaveProperty("refreshToken");
+		expect(sanitized.response.metadata.nested).not.toHaveProperty("x-api-key");
+		for (const secret of [
+			"nested-access-secret",
+			"camel-refresh-secret",
+			"hyphen-api-secret",
+			"embedded-secret",
+			"auth-secret",
+			"jwt.secret.value"
+		])
+			expect(body).not.toContain(secret);
+	});
+
 	it.each([
 		["chat", sseTranslateChat],
 		["completion", sseTranslateText]

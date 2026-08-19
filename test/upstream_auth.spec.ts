@@ -26,6 +26,54 @@ afterEach(() => {
 });
 
 describe("upstream authentication", () => {
+	it("preserves supported Responses fields while overriding gateway-controlled fields", async () => {
+		const env = {
+			KV: createKv(),
+			CHATGPT_LOCAL_CLIENT_ID: "client-id",
+			CHATGPT_RESPONSES_URL: "https://chatgpt.test/responses"
+		} as Env;
+		const fetchMock = vi.fn(async (url: string) =>
+			url === env.CHATGPT_RESPONSES_URL ? new Response("ok") : new Response("instructions")
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const requestBody = {
+			model: "client-model",
+			instructions: "unsafe fallback",
+			input: "hello",
+			previous_response_id: "resp_previous",
+			metadata: { trace: "safe", nested: { value: 7 } },
+			max_output_tokens: 321,
+			truncation: "auto",
+			include: ["web_search_call.action.sources"],
+			store: true,
+			service_tier: "priority",
+			stream: false,
+			prompt_cache_key: "client-cache-key"
+		};
+
+		await startUpstreamRequest(env, "gpt-5", [], {
+			instructions: "safe gateway instructions",
+			promptCacheKey: "stable-gateway-key",
+			responsesPayload: requestBody
+		});
+
+		const call = fetchMock.mock.calls.find(([url]) => url === env.CHATGPT_RESPONSES_URL)!;
+		const serialized = JSON.parse(String(call[1]?.body));
+		expect(serialized).toMatchObject({
+			...requestBody,
+			model: "gpt-5",
+			instructions: "safe gateway instructions",
+			stream: true,
+			prompt_cache_key: "stable-gateway-key"
+		});
+		expect(requestBody).toMatchObject({
+			model: "client-model",
+			instructions: "unsafe fallback",
+			stream: false,
+			prompt_cache_key: "client-cache-key"
+		});
+	});
+
 	it("serializes required tool choice, images, and the supplied cache key", async () => {
 		const env = {
 			KV: createKv(),

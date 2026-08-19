@@ -18,24 +18,45 @@ interface SseEvent {
 }
 
 const SAFE_ERROR = { message: "Upstream request failed" };
+const SAFE_ERROR_MESSAGE = SAFE_ERROR.message;
+
+const ERROR_TEXT_KEY = /^(?:error|raw_error|upstream_error|error_message|message|details|code)$/i;
+const TOKEN_VALUE =
+	/(?:Bearer\s+\S+|\b(?:access|refresh|auth|oauth|api|bearer|jwt|token)[-_][A-Za-z0-9._-]+|\bjwt\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b|\bsk-[A-Za-z0-9_-]+\b)/gi;
+
+function sanitizeString(value: string, errorText: boolean): string {
+	if (errorText) return SAFE_ERROR_MESSAGE;
+	return value.replace(TOKEN_VALUE, "[REDACTED]");
+}
+
+function isSensitiveKey(key: string): boolean {
+	const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+	return (
+		normalized === "token" || /(?:authorization|accesstoken|refreshtoken|idtoken|authtoken|apikey)$/.test(normalized)
+	);
+}
+
+function sanitizeValue(value: unknown, key?: string, errorText = false): unknown {
+	if (key && isSensitiveKey(key)) return undefined;
+	const nestedErrorText = errorText || Boolean(key && ERROR_TEXT_KEY.test(key));
+	if (typeof value === "string") return sanitizeString(value, nestedErrorText);
+	if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, undefined, errorText));
+	if (!value || typeof value !== "object") return value;
+
+	const sanitized: Record<string, unknown> = {};
+	for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+		const safeValue = sanitizeValue(nestedValue, nestedKey, nestedErrorText);
+		if (safeValue !== undefined) sanitized[nestedKey] = safeValue;
+	}
+	return sanitized;
+}
+
+export function sanitizeEventData<T>(value: T): T {
+	return sanitizeValue(value) as T;
+}
 
 function isErrorLike(type: unknown): boolean {
 	return typeof type === "string" && /(error|failed|incomplete|cancelled)/i.test(type);
-}
-
-function sanitizedErrorEvent(event: Record<string, unknown>): Record<string, unknown> {
-	const safeEvent = { ...event };
-	delete safeEvent.message;
-	delete safeEvent.code;
-	delete safeEvent.reason;
-	delete safeEvent.details;
-	const response =
-		event.response && typeof event.response === "object" ? (event.response as Record<string, unknown>) : undefined;
-	return {
-		...safeEvent,
-		...(response && { response: { ...response, error: SAFE_ERROR, incomplete_details: SAFE_ERROR } }),
-		error: SAFE_ERROR
-	};
 }
 
 function enqueueSafeError(controller: ReadableStreamDefaultController, encoder = new TextEncoder()): void {
@@ -69,7 +90,8 @@ export async function sseTranslateResponses(upstreamResponse: Response): Promise
 						}
 						try {
 							const event = JSON.parse(data);
-							const safeEvent = isErrorLike(event.type) ? sanitizedErrorEvent(event) : event;
+							const safeEvent = sanitizeEventData(event) as Record<string, unknown>;
+							if (isErrorLike(safeEvent.type) && !("error" in safeEvent)) safeEvent.error = SAFE_ERROR;
 							controller.enqueue(encoder.encode(`data: ${JSON.stringify(safeEvent)}\n\n`));
 						} catch {
 							enqueueSafeError(controller, encoder);
@@ -139,7 +161,7 @@ export async function sseTranslateChat(
 
 						let evt: SseEvent;
 						try {
-							evt = JSON.parse(data);
+							evt = sanitizeEventData(JSON.parse(data));
 						} catch {
 							enqueueSafeError(controller);
 							continue;
@@ -410,7 +432,7 @@ export async function sseTranslateText(
 
 						let evt: SseEvent;
 						try {
-							evt = JSON.parse(data);
+							evt = sanitizeEventData(JSON.parse(data));
 						} catch {
 							enqueueSafeError(controller);
 							continue;

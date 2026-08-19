@@ -3,7 +3,7 @@ import { getInstructionsForModel } from "../instructions";
 import { mapModelId } from "../model_mapping";
 import { openaiAuthMiddleware } from "../middleware/openaiAuthMiddleware";
 import { buildReasoningParam } from "../reasoning";
-import { sseTranslateResponses } from "../sse";
+import { sanitizeEventData, sseTranslateResponses } from "../sse";
 import { Env, InputItem, Tool } from "../types";
 import { startUpstreamRequest } from "../upstream";
 import { resolvePromptCacheKey } from "../conversation";
@@ -66,10 +66,7 @@ async function responseJson(upstream: Response, model: string): Promise<Response
 }
 
 function sanitizeTerminalResponse(response: Record<string, unknown>): Record<string, unknown> {
-	const sanitized = { ...response };
-	if ("error" in sanitized) sanitized.error = { message: "Upstream request failed" };
-	if ("incomplete_details" in sanitized) sanitized.incomplete_details = { reason: "Upstream request failed" };
-	return sanitized;
+	return sanitizeEventData(response);
 }
 
 responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
@@ -103,7 +100,8 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 			c.env.REASONING_SUMMARY || "auto",
 			reasoning
 		),
-		promptCacheKey
+		promptCacheKey,
+		responsesPayload: payload
 	});
 	if (error) return responseError("Upstream request failed", error.status || 502);
 	if (!upstream) return responseError("Upstream request failed", 502);

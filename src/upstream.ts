@@ -39,6 +39,7 @@ export async function startUpstreamRequest(
 		ollamaPath?: string; // Added for Ollama specific paths
 		ollamaPayload?: OllamaPayload; // Added for Ollama specific payloads
 		promptCacheKey?: string;
+		responsesPayload?: Record<string, unknown>;
 	}
 ): Promise<{ response: Response | null; error: Response | null }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
@@ -77,29 +78,38 @@ export async function startUpstreamRequest(
 
 	const baseInstructions = await getInstructionsForModel(model);
 
+	const responsesPayload = options?.responsesPayload;
 	const requestBody = isOllamaRequest
 		? JSON.stringify(options?.ollamaPayload)
-		: JSON.stringify({
-				model: normalizeModelName(model, env.DEBUG_MODEL),
-				instructions: instructions || baseInstructions, // Use fetched instructions
-				input: inputItems,
-				tools: tools || [],
-				tool_choice:
-					(toolChoice &&
-						(toolChoice === "auto" ||
-							toolChoice === "none" ||
-							toolChoice === "required" ||
-							typeof toolChoice === "object")) ||
-					toolChoice === undefined
-						? toolChoice || "auto"
-						: "auto",
-				parallel_tool_calls: parallelToolCalls || false,
-				store: false,
-				stream: true,
-				include: include,
-				prompt_cache_key: sessionId,
-				...(reasoningParam && { reasoning: reasoningParam })
-			});
+		: responsesPayload
+			? JSON.stringify({
+					...structuredClone(responsesPayload),
+					model: normalizeModelName(model, env.DEBUG_MODEL),
+					stream: true,
+					prompt_cache_key: sessionId,
+					instructions: instructions || baseInstructions
+				})
+			: JSON.stringify({
+					model: normalizeModelName(model, env.DEBUG_MODEL),
+					instructions: instructions || baseInstructions, // Use fetched instructions
+					input: inputItems,
+					tools: tools || [],
+					tool_choice:
+						(toolChoice &&
+							(toolChoice === "auto" ||
+								toolChoice === "none" ||
+								toolChoice === "required" ||
+								typeof toolChoice === "object")) ||
+						toolChoice === undefined
+							? toolChoice || "auto"
+							: "auto",
+					parallel_tool_calls: parallelToolCalls || false,
+					store: false,
+					stream: true,
+					include: include,
+					prompt_cache_key: sessionId,
+					...(reasoningParam && { reasoning: reasoningParam })
+				});
 
 	const headers: HeadersInit = {
 		"Content-Type": "application/json"
