@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getRefreshedAuth, refreshAccessToken } from "../src/auth_kv";
+import { AuthStore, getRefreshedAuth, refreshAccessToken } from "../src/auth_kv";
 import type { Env } from "../src/types";
 
 const AUTH_URL = "https://auth.openai.com/oauth/token";
@@ -21,11 +21,17 @@ function createKv(initial: Record<string, unknown> = {}) {
 		put: vi.fn(async (key: string, value: string) => {
 			values.set(key, value);
 		}),
+		delete: vi.fn(async (key: string) => {
+			values.delete(key);
+		}),
 		values
 	};
 }
 
-function createEnv(kv: ReturnType<typeof createKv>, auth = { tokens: fallbackTokens, last_refresh: new Date().toISOString() }) {
+function createEnv(
+	kv: ReturnType<typeof createKv>,
+	auth = { tokens: fallbackTokens, last_refresh: new Date().toISOString() }
+) {
 	return {
 		KV: kv,
 		OPENAI_API_KEY: "client-key",
@@ -41,9 +47,29 @@ afterEach(() => {
 });
 
 describe("Codex auth store", () => {
+	it("exports a deterministic AuthStore.getFresh boundary", async () => {
+		const now = new Date("2026-08-19T00:00:00.000Z").getTime();
+		const kv = createKv({
+			auth_tokens: JSON.stringify(fallbackTokens),
+			auth_last_refresh: new Date(0).toISOString(),
+			auth_expires_at: new Date(now + 60 * 60 * 1000).toISOString()
+		});
+		vi.stubGlobal("fetch", vi.fn());
+
+		await expect(AuthStore.getFresh(createEnv(kv), now)).resolves.toEqual({
+			accessToken: "fallback-access-token",
+			accountId: "fallback-account"
+		});
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
 	it("prefers persisted KV credentials over the deployment fallback", async () => {
 		const kv = createKv({
-			auth_tokens: JSON.stringify({ ...fallbackTokens, access_token: "persisted-access-token", account_id: "persisted-account" }),
+			auth_tokens: JSON.stringify({
+				...fallbackTokens,
+				access_token: "persisted-access-token",
+				account_id: "persisted-account"
+			}),
 			auth_last_refresh: new Date().toISOString()
 		});
 
@@ -64,7 +90,9 @@ describe("Codex auth store", () => {
 
 	it("returns an access-token-only fallback when refresh is unavailable", async () => {
 		const kv = createKv();
-		const env = createEnv(kv, { tokens: { access_token: "access-only-token", account_id: "access-only-account" } } as never);
+		const env = createEnv(kv, {
+			tokens: { access_token: "access-only-token", account_id: "access-only-account" }
+		} as never);
 
 		await expect(getRefreshedAuth(env)).resolves.toEqual({
 			accessToken: "access-only-token",
@@ -108,6 +136,31 @@ describe("Codex auth store", () => {
 		expect(second.accessToken).toBe("refreshed-access-token");
 	});
 
+	it("isolates same-isolate refresh coalescing by account", async () => {
+		const firstKv = createKv({
+			auth_tokens: JSON.stringify({ ...fallbackTokens, account_id: "account-a", refresh_token: "refresh-a" }),
+			auth_last_refresh: new Date(0).toISOString()
+		});
+		const secondKv = createKv({
+			auth_tokens: JSON.stringify({ ...fallbackTokens, account_id: "account-b", refresh_token: "refresh-b" }),
+			auth_last_refresh: new Date(0).toISOString()
+		});
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			return new Response(JSON.stringify({ access_token: `access-${body.refresh_token}` }));
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const [first, second] = await Promise.all([
+			AuthStore.getFresh(createEnv(firstKv), Date.now()),
+			AuthStore.getFresh(createEnv(secondKv), Date.now())
+		]);
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(first).toMatchObject({ accessToken: "access-refresh-a", accountId: "account-a" });
+		expect(second).toMatchObject({ accessToken: "access-refresh-b", accountId: "account-b" });
+	});
+
 	it("does not overwrite newer KV credentials after a refresh races", async () => {
 		const kv = createKv({
 			auth_tokens: JSON.stringify(fallbackTokens),
@@ -140,10 +193,30 @@ describe("Codex auth store", () => {
 	it("rejects malformed refresh responses without logging token values", async () => {
 		const kv = createKv();
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-		vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ id_token: "returned-id-token" }))));
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(JSON.stringify({ id_token: "returned-id-token" })))
+		);
 
 		await expect(refreshAccessToken(createEnv(kv))).resolves.toBeNull();
 		expect(errorSpy.mock.calls.flat().join(" ")).not.toContain("fallback-refresh-token");
 		expect(errorSpy.mock.calls.flat().join(" ")).not.toContain("returned-id-token");
+	});
+
+	it("removes stale expiry metadata when refresh omits expires_in", async () => {
+		const kv = createKv({
+			auth_tokens: JSON.stringify(fallbackTokens),
+			auth_last_refresh: new Date(0).toISOString(),
+			auth_expires_at: new Date(0).toISOString()
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(JSON.stringify({ access_token: "new-token" })))
+		);
+
+		await refreshAccessToken(createEnv(kv));
+
+		expect(kv.delete).toHaveBeenCalledWith("auth_expires_at");
+		expect(kv.values.has("auth_expires_at")).toBe(false);
 	});
 });

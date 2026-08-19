@@ -9,6 +9,14 @@ kv_namespaces = [
   { binding = "KV", id = "2e33dd7fc260405d906d61636cb82b61" }
 ]
 
+[[durable_objects.bindings]]
+name = "AUTH_REFRESH_COORDINATOR"
+class_name = "AuthRefreshCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AuthRefreshCoordinator"]
+
 
 # --- Local Development Configuration ---
 # This section configures local development with Docker and miniflare

@@ -1,5 +1,5 @@
 import { normalizeModelName } from "./utils";
-import { getRefreshedAuth, refreshAccessToken } from "./auth_kv"; // Updated import
+import { AuthStore } from "./auth_kv";
 import { getInstructionsForModel } from "./instructions";
 import { Env, InputItem, Tool } from "./types"; // Import types
 
@@ -19,6 +19,19 @@ type ErrorBody = {
 	raw?: string;
 	[key: string]: unknown;
 };
+
+function safeUpstreamLocation(requestUrl: string): string {
+	try {
+		const url = new URL(requestUrl);
+		return `${url.host}${url.pathname}`;
+	} catch {
+		return "invalid-url";
+	}
+}
+
+function logUpstreamError(status: number | "fetch-failed", requestUrl: string, metadata: string): void {
+	console.error(`Upstream request failed status=${status} url=${safeUpstreamLocation(requestUrl)} ${metadata}`);
+}
 
 async function generateSessionId(instructions: string | undefined, inputItems: InputItem[]): Promise<string> {
 	const content = `${instructions || ""}|${JSON.stringify(inputItems)}`;
@@ -43,7 +56,7 @@ export async function startUpstreamRequest(
 ): Promise<{ response: Response | null; error: Response | null }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
 
-	const { accessToken, accountId } = await getRefreshedAuth(env);
+	const { accessToken, accountId } = await AuthStore.getFresh(env, Date.now());
 
 	// KV token check (minimal logging)
 
@@ -126,27 +139,20 @@ export async function startUpstreamRequest(
 				.json()
 				.catch(() => ({ raw: upstreamResponse.statusText }))) as ErrorBody;
 
-			// Log complete error details for OpenAI failures
-			console.error("=== OPENAI API ERROR ===");
-			console.error("Status:", upstreamResponse.status, upstreamResponse.statusText);
-			console.error("URL:", requestUrl);
-			console.error("Headers:", Object.fromEntries(upstreamResponse.headers.entries()));
-			console.error("Error Body:", JSON.stringify(errorBody, null, 2));
-			console.error("Request Body:", requestBody);
-			console.error("========================");
+			logUpstreamError(upstreamResponse.status, requestUrl, "kind=http method=POST");
 
 			// Check if it's a 401 Unauthorized and we can refresh the token
-			if (upstreamResponse.status === 401 && env.OPENAI_CODEX_AUTH) {
-				const refreshedTokens = await refreshAccessToken(env);
-				if (refreshedTokens) {
+			if (upstreamResponse.status === 401) {
+				const refreshedAuth = await AuthStore.refresh(env, Date.now());
+				if (refreshedAuth.accessToken) {
 					const headers: HeadersInit = {
 						"Content-Type": "application/json"
 					};
 
 					if (!isOllamaRequest) {
-						headers["Authorization"] = `Bearer ${refreshedTokens.access_token}`;
+						headers["Authorization"] = `Bearer ${refreshedAuth.accessToken}`;
 						headers["Accept"] = "text/event-stream";
-						headers["chatgpt-account-id"] = refreshedTokens.account_id || accountId;
+						headers["chatgpt-account-id"] = refreshedAuth.accountId || accountId;
 						headers["OpenAI-Beta"] = "responses=experimental";
 						if (sessionId) {
 							headers["session_id"] = sessionId;
@@ -180,17 +186,7 @@ export async function startUpstreamRequest(
 
 		return { response: upstreamResponse, error: null };
 	} catch (e: unknown) {
-		// Log complete error details for fetch failures
-		console.error("=== UPSTREAM REQUEST FAILURE ===");
-		console.error("URL:", requestUrl);
-		console.error("Request Body:", requestBody);
-		console.error("Headers:", headers);
-		console.error("Error:", e);
-		if (e instanceof Error) {
-			console.error("Error Message:", e.message);
-			console.error("Error Stack:", e.stack);
-		}
-		console.error("================================");
+		logUpstreamError("fetch-failed", requestUrl, "kind=network method=POST");
 
 		return {
 			response: null,
