@@ -7,7 +7,9 @@ function configuredModelMap(value: string | undefined): Record<string, string> {
 		const parsed: unknown = JSON.parse(value);
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
 		return Object.fromEntries(
-			Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string" && !!entry[1].trim())
+			Object.entries(parsed).filter(
+				(entry): entry is [string, string] => typeof entry[1] === "string" && !!entry[1].trim()
+			)
 		);
 	} catch {
 		return {};

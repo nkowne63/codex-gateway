@@ -48,8 +48,7 @@ function sanitizeValue(value: unknown, key?: string, errorContext = false): unkn
 	}
 	if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, undefined, nestedErrorContext));
 	if (!value || typeof value !== "object") return value;
-	const objectErrorContext =
-		nestedErrorContext || isErrorLike((value as Record<string, unknown>).type);
+	const objectErrorContext = nestedErrorContext || isErrorLike((value as Record<string, unknown>).type);
 
 	const sanitized: Record<string, unknown> = {};
 	for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
