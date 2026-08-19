@@ -15,4 +15,11 @@ describe("stablePromptCacheKey", () => {
 
 		expect(first).not.toBe(second);
 	});
+
+	it("separates unrelated fallback request identifiers", async () => {
+		const first = await stablePromptCacheKey("request-1", "shared prefix");
+		const second = await stablePromptCacheKey("request-2", "shared prefix");
+
+		expect(first).not.toBe(second);
+	});
 });

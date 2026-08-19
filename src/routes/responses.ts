@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { stablePromptCacheKey } from "../cache_key";
 import { getInstructionsForModel } from "../instructions";
 import { mapModelId } from "../model_mapping";
 import { openaiAuthMiddleware } from "../middleware/openaiAuthMiddleware";
@@ -7,6 +6,7 @@ import { buildReasoningParam } from "../reasoning";
 import { sseTranslateResponses } from "../sse";
 import { Env, InputItem, Tool } from "../types";
 import { startUpstreamRequest } from "../upstream";
+import { resolvePromptCacheKey } from "../conversation";
 
 const responses = new Hono<{ Bindings: Env }>();
 
@@ -21,31 +21,35 @@ async function responseJson(upstream: Response, model: string): Promise<Response
 	const reader = upstream.body?.getReader();
 	if (!reader) return responseError("Upstream request failed", 502);
 
-	let id = "resp_gateway";
-	let outputText = "";
-	const output: unknown[] = [];
-	let failed = false;
+	let terminalResponse: Record<string, unknown> | undefined;
 	const decoder = new TextDecoder();
 	let buffer = "";
 	try {
 		while (true) {
 			const { done, value } = await reader.read();
-			if (done) break;
-			buffer += decoder.decode(value, { stream: true });
+			if (done) {
+				buffer += decoder.decode();
+				if (buffer) buffer += "\n";
+			}
+			if (value) buffer += decoder.decode(value, { stream: true });
 			const lines = buffer.split("\n");
 			buffer = lines.pop() || "";
 			for (const line of lines) {
 				if (!line.startsWith("data: ")) continue;
 				try {
 					const event = JSON.parse(line.slice(6));
-					if (typeof event.response?.id === "string") id = event.response.id;
-					if (event.type === "response.output_text.delta" && typeof event.delta === "string") outputText += event.delta;
-					if (event.type === "response.output_item.done" && event.item) output.push(event.item);
-					if (event.type === "response.failed") failed = true;
+					if (
+						/^response\.(completed|incomplete|cancelled|failed)$/.test(event.type) &&
+						event.response &&
+						typeof event.response === "object"
+					) {
+						terminalResponse = event.response;
+					}
 				} catch {
 					// Ignore malformed upstream events; do not reflect them to clients.
 				}
 			}
+			if (done) break;
 		}
 	} catch {
 		return responseError("Upstream request failed", 502);
@@ -53,19 +57,19 @@ async function responseJson(upstream: Response, model: string): Promise<Response
 		reader.releaseLock();
 	}
 
-	if (failed) return responseError("Upstream request failed", 502);
-	return new Response(
-		JSON.stringify({
-			id,
-			object: "response",
-			created_at: Math.floor(Date.now() / 1000),
-			status: "completed",
-			model,
-			output,
-			output_text: outputText
-		}),
-		{ status: upstream.status, headers: { "Content-Type": "application/json" } }
-	);
+	if (!terminalResponse) return responseError("Upstream request failed", 502);
+	const response = sanitizeTerminalResponse(terminalResponse);
+	return new Response(JSON.stringify({ ...response, model: response.model || model }), {
+		status: upstream.status,
+		headers: { "Content-Type": "application/json" }
+	});
+}
+
+function sanitizeTerminalResponse(response: Record<string, unknown>): Record<string, unknown> {
+	const sanitized = { ...response };
+	if ("error" in sanitized) sanitized.error = { message: "Upstream request failed" };
+	if ("incomplete_details" in sanitized) sanitized.incomplete_details = { reason: "Upstream request failed" };
+	return sanitized;
 }
 
 responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
@@ -82,14 +86,9 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 	if (!inputItems.length) return responseError("Request must include input", 400);
 
 	const model = mapModelId(payload.model as string | undefined, c.env);
-	const instructions = typeof payload.instructions === "string" ? payload.instructions : await getInstructionsForModel(model);
-	const conversationId =
-		typeof payload.conversation === "string"
-			? payload.conversation
-			: typeof payload.previous_response_id === "string"
-				? payload.previous_response_id
-				: undefined;
-	const promptCacheKey = await stablePromptCacheKey(conversationId, instructions);
+	const instructions =
+		typeof payload.instructions === "string" ? payload.instructions : await getInstructionsForModel(model);
+	const promptCacheKey = await resolvePromptCacheKey(payload, c.req.raw.headers, instructions);
 	const reasoning =
 		typeof payload.reasoning === "object" && payload.reasoning !== null
 			? (payload.reasoning as { effort?: string; summary?: string })
@@ -97,9 +96,13 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 	const { response: upstream, error } = await startUpstreamRequest(c.env, model, inputItems, {
 		instructions,
 		tools: Array.isArray(payload.tools) ? (payload.tools as Tool[]) : [],
-		toolChoice: payload.tool_choice as "auto" | "none" | { type: string; function: { name: string } },
+		toolChoice: payload.tool_choice as "auto" | "none" | "required" | { type: string; function: { name: string } },
 		parallelToolCalls: Boolean(payload.parallel_tool_calls),
-		reasoningParam: buildReasoningParam(c.env.REASONING_EFFORT || "minimal", c.env.REASONING_SUMMARY || "auto", reasoning),
+		reasoningParam: buildReasoningParam(
+			c.env.REASONING_EFFORT || "minimal",
+			c.env.REASONING_SUMMARY || "auto",
+			reasoning
+		),
 		promptCacheKey
 	});
 	if (error) return responseError("Upstream request failed", error.status || 502);
@@ -108,7 +111,12 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 	if (payload.stream) {
 		return new Response(await sseTranslateResponses(upstream), {
 			status: upstream.status,
-			headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...c.res.headers }
+			headers: {
+				"Content-Type": "text/event-stream",
+				"Cache-Control": "no-cache",
+				Connection: "keep-alive",
+				...c.res.headers
+			}
 		});
 	}
 	return responseJson(upstream, model);

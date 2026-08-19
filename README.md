@@ -313,6 +313,8 @@ Content-Type: application/json
 
 `MODEL_ID_MAP` selects the backend Codex model for OS-facing IDs. The gateway preserves Responses tool definitions, tool-call input/output items, and `data:image/*;base64,...` images. It never returns OAuth credentials or upstream error details to clients.
 
+For stable prompt caching across turns, send `prompt_cache_key` or `conversation_id` in the JSON request. The equivalent `Prompt-Cache-Key`/`X-Prompt-Cache-Key` and `Conversation-Id`/`X-Conversation-Id` headers are also accepted. `previous_response_id` is not used as conversation identity because it changes on every turn. Legacy Chat Completions and Completions requests may use the same fields or headers; otherwise the gateway derives a key from `Session-Id`, `Request-Id` (including their `X-` forms), or a unique per-request fallback. Only an explicit prompt-cache or conversation ID guarantees cross-turn stability.
+
 #### Advanced Reasoning
 Enable enhanced reasoning capabilities:
 ```json

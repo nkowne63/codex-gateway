@@ -11,7 +11,20 @@ app.use(
 	"*",
 	cors({
 		origin: "*", // Or specify allowed origins
-		allowHeaders: ["Content-Type", "Authorization", "OpenAI-Beta", "chatgpt-account-id"],
+		allowHeaders: [
+			"Content-Type",
+			"Authorization",
+			"OpenAI-Beta",
+			"chatgpt-account-id",
+			"Prompt-Cache-Key",
+			"X-Prompt-Cache-Key",
+			"Conversation-Id",
+			"X-Conversation-Id",
+			"Session-Id",
+			"X-Session-Id",
+			"Request-Id",
+			"X-Request-Id"
+		],
 		allowMethods: ["POST", "GET", "OPTIONS"],
 		exposeHeaders: ["Content-Length", "X-Kuma-Revision"],
 		maxAge: 600,

@@ -26,6 +26,30 @@ afterEach(() => {
 });
 
 describe("upstream authentication", () => {
+	it("serializes required tool choice, images, and the supplied cache key", async () => {
+		const env = {
+			KV: createKv(),
+			CHATGPT_LOCAL_CLIENT_ID: "client-id",
+			CHATGPT_RESPONSES_URL: "https://chatgpt.test/responses"
+		} as Env;
+		const fetchMock = vi.fn(async (url: string) =>
+			url === env.CHATGPT_RESPONSES_URL ? new Response("ok") : new Response("instructions")
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const input = [
+			{ type: "message", role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,abc" }] }
+		] as any;
+		const tools = [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }] as any;
+		await startUpstreamRequest(env, "gpt-5", input, {
+			tools,
+			toolChoice: "required" as any,
+			promptCacheKey: "cache-stable"
+		});
+		const call = fetchMock.mock.calls.find(([url]) => url === env.CHATGPT_RESPONSES_URL)!;
+		const body = JSON.parse(String(call[1]?.body));
+		expect(body).toMatchObject({ input, tools, tool_choice: "required", prompt_cache_key: "cache-stable" });
+		expect(new Headers(call[1]?.headers).get("session_id")).toBe("cache-stable");
+	});
 	it("refreshes a KV-only credential after a 401", async () => {
 		const env = {
 			KV: createKv(),

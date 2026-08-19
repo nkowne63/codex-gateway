@@ -9,7 +9,7 @@ type ReasoningParam = {
 	summary?: string;
 };
 
-type ToolChoice = "auto" | "none" | { type: string; function: { name: string } };
+type ToolChoice = "auto" | "none" | "required" | { type: string; function: { name: string } };
 
 type OllamaPayload = Record<string, unknown>;
 
@@ -71,7 +71,9 @@ export async function startUpstreamRequest(
 		? `${env.OLLAMA_API_URL}${options?.ollamaPath}` // Assuming OLLAMA_API_URL is in Env
 		: env.CHATGPT_RESPONSES_URL;
 
-	const sessionId = isOllamaRequest ? undefined : options?.promptCacheKey || (await stablePromptCacheKey(undefined, instructions || model));
+	const sessionId = isOllamaRequest
+		? undefined
+		: options?.promptCacheKey || (await stablePromptCacheKey(crypto.randomUUID(), instructions || model));
 
 	const baseInstructions = await getInstructionsForModel(model);
 
@@ -83,7 +85,11 @@ export async function startUpstreamRequest(
 				input: inputItems,
 				tools: tools || [],
 				tool_choice:
-					(toolChoice && (toolChoice === "auto" || toolChoice === "none" || typeof toolChoice === "object")) ||
+					(toolChoice &&
+						(toolChoice === "auto" ||
+							toolChoice === "none" ||
+							toolChoice === "required" ||
+							typeof toolChoice === "object")) ||
 					toolChoice === undefined
 						? toolChoice || "auto"
 						: "auto",

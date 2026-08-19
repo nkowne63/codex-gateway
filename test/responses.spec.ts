@@ -20,13 +20,14 @@ describe("Responses endpoint", () => {
 			response: new Response(
 				'data: {"type":"response.created","response":{"id":"resp_123"}}\n\n' +
 					'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n' +
-					'data: {"type":"response.completed","response":{"id":"resp_123"}}\n\n'
+					'data: {"type":"response.completed","response":{"id":"resp_123","object":"response","status":"completed","model":"gpt-5-codex","output":[],"output_text":"Hello"}}\n\n'
 			),
 			error: null
 		});
 		const payload = {
 			model: "homelab-codex",
-			conversation: "conv-42",
+			conversation_id: "conv-42",
+			prompt_cache_key: "cache-42",
 			input: [
 				{
 					type: "message",
@@ -62,8 +63,101 @@ describe("Responses endpoint", () => {
 			env,
 			"gpt-5-codex",
 			payload.input,
-			expect.objectContaining({ tools: payload.tools, promptCacheKey: expect.any(String) })
+			expect.objectContaining({ tools: payload.tools, toolChoice: undefined, promptCacheKey: "cache-42" })
 		);
+	});
+
+	it("keeps one explicit conversation identity across a previous-response chain", async () => {
+		startUpstreamRequest.mockResolvedValue({
+			response: new Response(
+				'data: {"type":"response.completed","response":{"id":"resp","object":"response","status":"completed","output":[]}}\n\n'
+			),
+			error: null
+		});
+		for (const previous_response_id of ["resp-1", "resp-2"]) {
+			await responses.fetch(
+				new Request("https://gateway.test/v1/responses", {
+					method: "POST",
+					headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+					body: JSON.stringify({ input: "hello", conversation_id: "conv-stable", previous_response_id })
+				}),
+				env
+			);
+		}
+		const keys = startUpstreamRequest.mock.calls.slice(-2).map((call) => call[3].promptCacheKey);
+		expect(keys[0]).toBe(keys[1]);
+	});
+
+	it("uses distinct fallback keys for unrelated requests", async () => {
+		startUpstreamRequest.mockResolvedValue({
+			response: new Response(
+				'data: {"type":"response.completed","response":{"id":"resp","object":"response","status":"completed","output":[]}}\n\n'
+			),
+			error: null
+		});
+		for (let index = 0; index < 2; index++) {
+			await responses.fetch(
+				new Request("https://gateway.test/v1/responses", {
+					method: "POST",
+					headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+					body: JSON.stringify({ input: "hello" })
+				}),
+				env
+			);
+		}
+		const keys = startUpstreamRequest.mock.calls.slice(-2).map((call) => call[3].promptCacheKey);
+		expect(keys[0]).not.toBe(keys[1]);
+	});
+
+	it.each(["incomplete", "cancelled", "failed"])("preserves an authoritative %s terminal response", async (status) => {
+		const terminal = {
+			id: "resp_terminal",
+			object: "response",
+			status,
+			model: "upstream-model",
+			output: [{ type: "message", content: [] }],
+			usage: { input_tokens: 3 },
+			metadata: { trace: "safe" },
+			error: { message: "Bearer oauth-secret", code: "token-secret" }
+		};
+		startUpstreamRequest.mockResolvedValueOnce({
+			response: new Response(`data: ${JSON.stringify({ type: `response.${status}`, response: terminal })}`),
+			error: null
+		});
+		const response = await responses.fetch(
+			new Request("https://gateway.test/v1/responses", {
+				method: "POST",
+				headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+				body: JSON.stringify({ input: "hello" })
+			}),
+			env
+		);
+		const body = (await response.json()) as Record<string, any>;
+		expect(body).toMatchObject({
+			id: "resp_terminal",
+			status,
+			output: terminal.output,
+			usage: terminal.usage,
+			metadata: terminal.metadata
+		});
+		expect(JSON.stringify(body)).not.toContain("oauth-secret");
+		expect(JSON.stringify(body)).not.toContain("token-secret");
+	});
+
+	it("rejects deltas without an authoritative terminal response", async () => {
+		startUpstreamRequest.mockResolvedValueOnce({
+			response: new Response('data: {"type":"response.output_text.delta","delta":"orphan"}'),
+			error: null
+		});
+		const response = await responses.fetch(
+			new Request("https://gateway.test/v1/responses", {
+				method: "POST",
+				headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+				body: JSON.stringify({ input: "hello" })
+			}),
+			env
+		);
+		expect(response.status).toBe(502);
 	});
 
 	it("returns Responses SSE and redacts upstream error details", async () => {

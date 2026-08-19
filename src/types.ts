@@ -7,7 +7,7 @@ export type VerboseMode = "true" | "false";
 // Strict types for API and message handling
 export type MessageRole = "system" | "user" | "assistant" | "tool";
 export type ToolType = "function";
-export type ToolChoiceType = "auto" | "none" | { type: "function"; function: { name: string } };
+export type ToolChoiceType = "auto" | "none" | "required" | { type: "function"; function: { name: string } };
 export type InputItemType = "message" | "function_call" | "function_call_output";
 
 export interface Env {

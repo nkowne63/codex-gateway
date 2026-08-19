@@ -17,6 +17,31 @@ interface SseEvent {
 	delta?: string;
 }
 
+const SAFE_ERROR = { message: "Upstream request failed" };
+
+function isErrorLike(type: unknown): boolean {
+	return typeof type === "string" && /(error|failed|incomplete|cancelled)/i.test(type);
+}
+
+function sanitizedErrorEvent(event: Record<string, unknown>): Record<string, unknown> {
+	const safeEvent = { ...event };
+	delete safeEvent.message;
+	delete safeEvent.code;
+	delete safeEvent.reason;
+	delete safeEvent.details;
+	const response =
+		event.response && typeof event.response === "object" ? (event.response as Record<string, unknown>) : undefined;
+	return {
+		...safeEvent,
+		...(response && { response: { ...response, error: SAFE_ERROR, incomplete_details: SAFE_ERROR } }),
+		error: SAFE_ERROR
+	};
+}
+
+function enqueueSafeError(controller: ReadableStreamDefaultController, encoder = new TextEncoder()): void {
+	controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", error: SAFE_ERROR })}\n\n`));
+}
+
 export async function sseTranslateResponses(upstreamResponse: Response): Promise<ReadableStream> {
 	const reader = upstreamResponse.body?.getReader();
 	if (!reader) throw new Error("Upstream response body is not readable.");
@@ -28,8 +53,11 @@ export async function sseTranslateResponses(upstreamResponse: Response): Promise
 			try {
 				while (true) {
 					const { done, value } = await reader.read();
-					if (done) break;
-					buffer += decoder.decode(value, { stream: true });
+					if (value) buffer += decoder.decode(value, { stream: true });
+					if (done) {
+						buffer += decoder.decode();
+						if (buffer) buffer += "\n";
+					}
 					const lines = buffer.split("\n");
 					buffer = lines.pop() || "";
 					for (const line of lines) {
@@ -41,15 +69,16 @@ export async function sseTranslateResponses(upstreamResponse: Response): Promise
 						}
 						try {
 							const event = JSON.parse(data);
-							if (event.type === "response.failed") event.response = { ...event.response, error: { message: "Upstream request failed" } };
-							controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+							const safeEvent = isErrorLike(event.type) ? sanitizedErrorEvent(event) : event;
+							controller.enqueue(encoder.encode(`data: ${JSON.stringify(safeEvent)}\n\n`));
 						} catch {
-							controller.enqueue(encoder.encode('data: {"type":"error","error":{"message":"Upstream request failed"}}\n\n'));
+							enqueueSafeError(controller, encoder);
 						}
 					}
+					if (done) break;
 				}
 			} catch {
-				controller.enqueue(encoder.encode('data: {"type":"error","error":{"message":"Upstream request failed"}}\n\n'));
+				enqueueSafeError(controller, encoder);
 			} finally {
 				reader.releaseLock();
 				controller.close();
@@ -65,6 +94,7 @@ export async function sseTranslateChat(
 	verbose: boolean = false,
 	reasoningCompat: string = "think-tags"
 ): Promise<ReadableStream> {
+	void verbose;
 	const reader = upstreamResponse.body?.getReader();
 	if (!reader) {
 		throw new Error("Upstream response body is not readable.");
@@ -84,19 +114,17 @@ export async function sseTranslateChat(
 			try {
 				while (true) {
 					const { done, value } = await reader.read();
+					if (value) buffer += decoder.decode(value, { stream: true });
 					if (done) {
-						break;
+						buffer += decoder.decode();
+						if (buffer) buffer += "\n";
 					}
-					buffer += decoder.decode(value, { stream: true });
 
 					// Process lines from the buffer
 					const lines = buffer.split("\n");
 					buffer = lines.pop() || ""; // Keep the last (possibly incomplete) line in buffer
 
 					for (const line of lines) {
-						if (verbose) {
-							console.log(line);
-						}
 						if (!line.startsWith("data: ")) {
 							continue;
 						}
@@ -112,8 +140,8 @@ export async function sseTranslateChat(
 						let evt: SseEvent;
 						try {
 							evt = JSON.parse(data);
-						} catch (e) {
-							console.error("Failed to parse SSE data:", e);
+						} catch {
+							enqueueSafeError(controller);
 							continue;
 						}
 
@@ -122,7 +150,9 @@ export async function sseTranslateChat(
 							responseId = evt.response.id || responseId;
 						}
 
-						if (kind === "response.output_text.delta") {
+						if (isErrorLike(kind)) {
+							enqueueSafeError(controller);
+						} else if (kind === "response.output_text.delta") {
 							const delta = evt.delta || "";
 							if (reasoningCompat === "think-tags" && thinkOpen && !thinkClosed) {
 								const closeChunk = {
@@ -299,10 +329,6 @@ export async function sseTranslateChat(
 								choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
 							};
 							controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`));
-						} else if (kind === "response.failed") {
-							const err = (evt.response && evt.response.error && evt.response.error.message) || "response.failed";
-							const chunk = { error: { message: err } };
-							controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`));
 						} else if (kind === "response.completed") {
 							if (reasoningCompat === "think-tags" && thinkOpen && !thinkClosed) {
 								const closeChunk = {
@@ -320,10 +346,10 @@ export async function sseTranslateChat(
 							break;
 						}
 					}
+					if (done) break;
 				}
-			} catch (error) {
-				console.error("SSE stream error:", error);
-				controller.error(error);
+			} catch {
+				enqueueSafeError(controller);
 			} finally {
 				reader.releaseLock();
 				controller.close();
@@ -338,6 +364,7 @@ export async function sseTranslateText(
 	created: number,
 	verbose: boolean = false
 ): Promise<ReadableStream> {
+	void verbose;
 	const reader = upstreamResponse.body?.getReader();
 	if (!reader) {
 		throw new Error("Upstream response body is not readable.");
@@ -353,18 +380,16 @@ export async function sseTranslateText(
 			try {
 				while (true) {
 					const { done, value } = await reader.read();
+					if (value) buffer += decoder.decode(value, { stream: true });
 					if (done) {
-						break;
+						buffer += decoder.decode();
+						if (buffer) buffer += "\n";
 					}
-					buffer += decoder.decode(value, { stream: true });
 
 					const lines = buffer.split("\n");
 					buffer = lines.pop() || "";
 
 					for (const line of lines) {
-						if (verbose) {
-							console.log(line);
-						}
 						if (!line.startsWith("data: ")) {
 							continue;
 						}
@@ -386,8 +411,8 @@ export async function sseTranslateText(
 						let evt: SseEvent;
 						try {
 							evt = JSON.parse(data);
-						} catch (e) {
-							console.error("Failed to parse SSE data:", e);
+						} catch {
+							enqueueSafeError(controller);
 							continue;
 						}
 
@@ -395,7 +420,9 @@ export async function sseTranslateText(
 						if (evt.response && typeof evt.response.id === "string") {
 							responseId = evt.response.id || responseId;
 						}
-						if (kind === "response.output_text.delta") {
+						if (isErrorLike(kind)) {
+							enqueueSafeError(controller);
+						} else if (kind === "response.output_text.delta") {
 							const deltaText = evt.delta || "";
 							const chunk = {
 								id: responseId,
@@ -419,10 +446,10 @@ export async function sseTranslateText(
 							break;
 						}
 					}
+					if (done) break;
 				}
-			} catch (error) {
-				console.error("SSE stream error:", error);
-				controller.error(error);
+			} catch {
+				enqueueSafeError(controller);
 			} finally {
 				reader.releaseLock();
 				controller.close();

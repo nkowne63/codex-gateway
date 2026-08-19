@@ -7,6 +7,7 @@ import { sseTranslateChat, sseTranslateText } from "../sse";
 import { getInstructionsForModel } from "../instructions";
 import { openaiAuthMiddleware } from "../middleware/openaiAuthMiddleware";
 import { MODEL_PRESETS, getReasoningEffortForModel, isModelPreset } from "../models";
+import { resolvePromptCacheKey } from "../conversation";
 
 const openai = new Hono<{ Bindings: Env }>();
 
@@ -99,13 +100,15 @@ openai.post("/v1/chat/completions", openaiAuthMiddleware(), async (c) => {
 	}
 
 	const instructions = await getInstructionsForModel(model);
+	const promptCacheKey = await resolvePromptCacheKey(payload, c.req.raw.headers, instructions);
 
 	const { response: upstream, error: errorResp } = await startUpstreamRequest(c.env, model, inputItems, {
 		instructions: instructions,
 		tools: toolsResponses,
 		toolChoice: toolChoice,
 		parallelToolCalls: parallelToolCalls,
-		reasoningParam: reasoningParam
+		reasoningParam: reasoningParam,
+		promptCacheKey
 	});
 
 	if (verbose) {
@@ -284,10 +287,12 @@ openai.post("/v1/completions", openaiAuthMiddleware(), async (c) => {
 	const reasoningParam = buildReasoningParam(reasoningEffort, reasoningSummary, reasoningOverrides);
 
 	const instructions = await getInstructionsForModel(model);
+	const promptCacheKey = await resolvePromptCacheKey(payload, c.req.raw.headers, instructions);
 
 	const { response: upstream, error: errorResp } = await startUpstreamRequest(c.env, model, inputItems, {
 		instructions: instructions,
-		reasoningParam: reasoningParam
+		reasoningParam: reasoningParam,
+		promptCacheKey
 	});
 
 	if (errorResp) {
@@ -385,7 +390,7 @@ openai.post("/v1/completions", openaiAuthMiddleware(), async (c) => {
 	}
 });
 
-openai.get("/v1/models", (c) => {
+openai.get("/v1/models", openaiAuthMiddleware(), (c) => {
 	const models = {
 		object: "list",
 		data: [
@@ -402,7 +407,7 @@ openai.get("/v1/models", (c) => {
 	return c.json(models);
 });
 
-openai.get("/v1/model-presets", (c) => {
+openai.get("/v1/model-presets", openaiAuthMiddleware(), (c) => {
 	return c.json({
 		object: "list",
 		data: MODEL_PRESETS
