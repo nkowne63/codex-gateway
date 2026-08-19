@@ -141,7 +141,7 @@ Create a `.dev.vars` file:
 OPENAI_API_KEY=sk-your-secret-api-key-here
 
 # Required: Codex CLI authentication JSON
-OPENAI_CODEX_AUTH={"tokens":{"id_token":"eyJ...","access_token":"sk-proj-...","refresh_token":"rft_...","account_id":"user-..."},"last_refresh":"2024-01-15T10:30:00.000Z"}
+OPENAI_CODEX_AUTH={"tokens":{"id_token":"eyJ...","access_token":"sk-proj-...","refresh_token":"rft_...","account_id":"user-..."},"last_refresh":"2024-01-15T10:30:00.000Z","expires_at":"2024-01-15T11:30:00.000Z"}
 
 # Required: ChatGPT API configuration
 CHATGPT_LOCAL_CLIENT_ID=your_client_id_here
@@ -256,7 +256,9 @@ The service will be available at `http://localhost:8787`
 - **Automatic Refresh**: Tokens are automatically refreshed when they expire or are older than 28 days
 - **KV Persistence**: Refreshed tokens are stored in Cloudflare KV for persistence across requests
 - **Fallback Logic**: Falls back from KV → environment → refresh → retry seamlessly
-- **Debug Logging**: Comprehensive token source tracking for troubleshooting
+- **First Boot**: When KV is empty, `OPENAI_CODEX_AUTH` initializes the persisted token set. Subsequent requests use KV first.
+- **Safe Refreshing**: Concurrent requests in one Worker isolate share a refresh operation; a stale result cannot replace newer KV credentials.
+- **Debug Logging**: OAuth refresh logs contain status and error category only; token values are never logged.
 
 ### KV Namespaces
 

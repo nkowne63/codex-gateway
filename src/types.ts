@@ -82,9 +82,9 @@ export type ToolDefinition = {
 export type ToolChoice = ToolChoiceType;
 
 export interface TokenData {
-	id_token: string;
+	id_token?: string;
 	access_token: string;
-	refresh_token: string;
+	refresh_token?: string;
 	account_id?: string;
 }
 
@@ -92,6 +92,7 @@ export interface AuthDotJson {
 	OPENAI_API_KEY?: string;
 	tokens?: TokenData;
 	last_refresh?: string; // ISO 8601 timestamp
+	expires_at?: string; // ISO 8601 timestamp
 }
 
 export interface RefreshRequest {
@@ -102,9 +103,10 @@ export interface RefreshRequest {
 }
 
 export interface RefreshResponse {
-	id_token: string;
+	id_token?: string;
 	access_token?: string;
 	refresh_token?: string;
+	expires_in?: number;
 }
 
 export interface ModelPreset {

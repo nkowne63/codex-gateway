@@ -1,205 +1,196 @@
 import { AuthDotJson, TokenData, RefreshRequest, RefreshResponse, Env } from "./types";
 
-type JwtClaims = {
-	"https://api.openai.com/auth"?: {
-		chatgpt_account_id?: string;
-	};
-} & Record<string, unknown>;
+const AUTH_TOKENS_KEY = "auth_tokens";
+const AUTH_LAST_REFRESH_KEY = "auth_last_refresh";
+const AUTH_EXPIRES_AT_KEY = "auth_expires_at";
+const REFRESH_INTERVAL_MS = 28 * 24 * 60 * 60 * 1000;
+const EXPIRY_SKEW_MS = 60 * 1000;
+
+type StoredAuth = { tokens: TokenData; lastRefresh: string | null; expiresAt: string | null };
+
+let refreshInFlight: Promise<TokenData | null> | null = null;
+
+type JwtClaims = { "https://api.openai.com/auth"?: { chatgpt_account_id?: string } } & Record<string, unknown>;
+
+function logAuthError(message: string, status?: number): void {
+	console.error(status === undefined ? message : `${message} (status ${status})`);
+}
 
 function urlBase64Decode(input: string): string {
-	// Replace non-url-safe chars with url-safe ones
 	input = input.replace(/-/g, "+").replace(/_/g, "/");
-	// Pad out with = for base64.decode to work
 	const pad = input.length % 4;
-	if (pad) {
-		input += new Array(5 - pad).join("=");
-	}
+	if (pad) input += new Array(5 - pad).join("=");
 	return atob(input);
 }
 
 function parseJwtClaims(token: string): JwtClaims | null {
-	if (!token || token.split(".").length !== 3) {
-		return null;
-	}
+	if (!token || token.split(".").length !== 3) return null;
 	try {
-		const payload = token.split(".");
-		const decoded = urlBase64Decode(payload[1]);
-		return JSON.parse(decoded);
-	} catch (e) {
-		console.error("Error parsing JWT claims:", e);
+		return JSON.parse(urlBase64Decode(token.split(".")[1]));
+	} catch {
+		logAuthError("Unable to parse OAuth ID token claims");
 		return null;
 	}
 }
 
-export async function getEffectiveChatgptAuth(
-	env: Env
-): Promise<{ accessToken: string | null; accountId: string | null }> {
-	if (!env.OPENAI_CODEX_AUTH) {
-		return { accessToken: null, accountId: null };
-	}
-
-	try {
-		const auth: AuthDotJson = JSON.parse(env.OPENAI_CODEX_AUTH);
-		const tokens = auth.tokens;
-
-		if (!tokens) {
-			return { accessToken: null, accountId: null };
-		}
-
-		let accountId: string | null = tokens.account_id || null;
-
-		if (!accountId && tokens.id_token) {
-			const claims = parseJwtClaims(tokens.id_token);
-			if (claims && claims["https://api.openai.com/auth"]) {
-				accountId = claims["https://api.openai.com/auth"].chatgpt_account_id || null;
-			}
-		}
-
-		return { accessToken: tokens.access_token, accountId: accountId };
-	} catch (e) {
-		console.error("Error parsing OPENAI_CODEX_AUTH:", e);
-		return { accessToken: null, accountId: null };
-	}
+function isTokenData(value: unknown): value is TokenData {
+	if (!value || typeof value !== "object") return false;
+	const tokens = value as Partial<TokenData>;
+	return (
+		typeof tokens.access_token === "string" &&
+		tokens.access_token.length > 0 &&
+		(tokens.refresh_token === undefined || (typeof tokens.refresh_token === "string" && tokens.refresh_token.length > 0)) &&
+		(tokens.id_token === undefined || typeof tokens.id_token === "string")
+	);
 }
 
-// Token refresh functionality
-export async function refreshAccessToken(env: Env): Promise<TokenData | null> {
-	if (!env.OPENAI_CODEX_AUTH) {
-		return null;
-	}
+function validIsoDate(value: unknown): string | null {
+	return typeof value === "string" && !Number.isNaN(Date.parse(value)) ? value : null;
+}
 
+function getFallbackAuth(env: Env): StoredAuth | null {
+	if (!env.OPENAI_CODEX_AUTH) return null;
 	try {
-		const auth: AuthDotJson = JSON.parse(env.OPENAI_CODEX_AUTH);
-		const tokens = auth.tokens;
-
-		if (!tokens || !tokens.refresh_token) {
-			console.error("No refresh token available");
+		const auth = JSON.parse(env.OPENAI_CODEX_AUTH) as AuthDotJson;
+		if (!isTokenData(auth.tokens)) {
+			logAuthError("OPENAI_CODEX_AUTH does not contain valid OAuth tokens");
 			return null;
 		}
+		return { tokens: auth.tokens, lastRefresh: validIsoDate(auth.last_refresh), expiresAt: validIsoDate(auth.expires_at) };
+	} catch {
+		logAuthError("Unable to parse OPENAI_CODEX_AUTH");
+		return null;
+	}
+}
 
-		const clientId = env.CHATGPT_LOCAL_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann";
+async function loadStoredAuth(env: Env, seedFallback: boolean): Promise<StoredAuth | null> {
+	if (env.KV) {
+		try {
+			const tokens = await env.KV.get(AUTH_TOKENS_KEY, "json");
+			if (isTokenData(tokens)) {
+				return {
+					tokens,
+					lastRefresh: validIsoDate(await env.KV.get(AUTH_LAST_REFRESH_KEY)),
+					expiresAt: validIsoDate(await env.KV.get(AUTH_EXPIRES_AT_KEY))
+				};
+			}
+		} catch {
+			logAuthError("Unable to read persisted OAuth credentials");
+		}
+	}
 
-		const refreshRequest: RefreshRequest = {
-			client_id: clientId,
-			grant_type: "refresh_token",
-			refresh_token: tokens.refresh_token,
-			scope: "openid profile email"
-		};
+	const fallback = getFallbackAuth(env);
+	if (fallback && env.KV && seedFallback) await persistAuth(env, fallback);
+	return fallback;
+}
 
+async function persistAuth(env: Env, auth: StoredAuth): Promise<void> {
+	if (!env.KV) return;
+	await env.KV.put(AUTH_TOKENS_KEY, JSON.stringify(auth.tokens));
+	await env.KV.put(AUTH_LAST_REFRESH_KEY, auth.lastRefresh || new Date().toISOString());
+	if (auth.expiresAt) await env.KV.put(AUTH_EXPIRES_AT_KEY, auth.expiresAt);
+}
+
+function needsRefresh(auth: StoredAuth): boolean {
+	if (auth.expiresAt) return Date.parse(auth.expiresAt) <= Date.now() + EXPIRY_SKEW_MS;
+	return !auth.lastRefresh || Date.parse(auth.lastRefresh) <= Date.now() - REFRESH_INTERVAL_MS;
+}
+
+function accountIdFor(tokens: TokenData): string | null {
+	if (tokens.account_id) return tokens.account_id;
+	return tokens.id_token ? parseJwtClaims(tokens.id_token)?.["https://api.openai.com/auth"]?.chatgpt_account_id || null : null;
+}
+
+export async function getEffectiveChatgptAuth(env: Env): Promise<{ accessToken: string | null; accountId: string | null }> {
+	const auth = await loadStoredAuth(env, true);
+	return auth ? { accessToken: auth.tokens.access_token, accountId: accountIdFor(auth.tokens) } : { accessToken: null, accountId: null };
+}
+
+async function refreshStoredAuth(env: Env): Promise<TokenData | null> {
+	const source = await loadStoredAuth(env, true);
+	if (!source) return null;
+	if (!source.tokens.refresh_token) {
+		logAuthError("OAuth refresh is unavailable because no refresh token is configured");
+		return null;
+	}
+
+	const request: RefreshRequest = {
+		client_id: env.CHATGPT_LOCAL_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann",
+		grant_type: "refresh_token",
+		refresh_token: source.tokens.refresh_token,
+		scope: "openid profile email"
+	};
+
+	try {
 		const response = await fetch("https://auth.openai.com/oauth/token", {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json"
-			},
-			body: JSON.stringify(refreshRequest)
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(request)
 		});
-
 		if (!response.ok) {
-			const errorText = await response.text().catch(() => "Unable to read error response");
-			console.error("=== TOKEN REFRESH FAILURE ===");
-			console.error("Status:", response.status, response.statusText);
-			console.error("Response Headers:", Object.fromEntries(response.headers.entries()));
-			console.error("Error Body:", errorText);
-			console.error("Request Body:", JSON.stringify(refreshRequest, null, 2));
-			console.error("=============================");
+			logAuthError("OAuth refresh request failed", response.status);
 			return null;
 		}
 
-		const refreshResponse: RefreshResponse = await response.json();
+		let refreshed: RefreshResponse;
+		try {
+			refreshed = (await response.json()) as RefreshResponse;
+		} catch {
+			logAuthError("OAuth refresh response was not valid JSON");
+			return null;
+		}
+		if (typeof refreshed.access_token !== "string" || refreshed.access_token.length === 0) {
+			logAuthError("OAuth refresh response did not include an access token");
+			return null;
+		}
 
-		// Update tokens
-		const updatedTokens: TokenData = {
-			id_token: refreshResponse.id_token,
-			access_token: refreshResponse.access_token || tokens.access_token,
-			refresh_token: refreshResponse.refresh_token || tokens.refresh_token,
-			account_id: tokens.account_id
+		const current = await loadStoredAuth(env, false);
+		if (
+			current &&
+			(JSON.stringify(current.tokens) !== JSON.stringify(source.tokens) ||
+				current.lastRefresh !== source.lastRefresh ||
+				current.expiresAt !== source.expiresAt)
+		) {
+			return current.tokens;
+		}
+
+		const expiresAt =
+			typeof refreshed.expires_in === "number" && Number.isFinite(refreshed.expires_in) && refreshed.expires_in > 0
+				? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
+				: null;
+		const updated: StoredAuth = {
+			tokens: {
+				id_token: typeof refreshed.id_token === "string" ? refreshed.id_token : source.tokens.id_token,
+				access_token: refreshed.access_token,
+				refresh_token: typeof refreshed.refresh_token === "string" && refreshed.refresh_token.length > 0 ? refreshed.refresh_token : source.tokens.refresh_token,
+				account_id: source.tokens.account_id
+			},
+			lastRefresh: new Date().toISOString(),
+			expiresAt
 		};
-
-		// Update the auth in environment (this is a limitation - we can't modify env vars directly)
-		// In a real implementation, you'd want to update the stored auth.json
-		// const updatedAuth: AuthDotJson = {
-		// 	...auth,
-		// 	tokens: updatedTokens,
-		// 	last_refresh: new Date().toISOString()
-		// };
-
-		// Store in KV if available
-		if (env.KV) {
-			await env.KV.put("auth_tokens", JSON.stringify(updatedTokens));
-			await env.KV.put("auth_last_refresh", new Date().toISOString());
-		}
-		return updatedTokens;
-	} catch (e) {
-		console.error("=== TOKEN REFRESH EXCEPTION ===");
-		console.error("Error:", e);
-		if (e instanceof Error) {
-			console.error("Error Message:", e.message);
-			console.error("Error Stack:", e.stack);
-		}
-		console.error("===============================");
+		await persistAuth(env, updated);
+		return updated.tokens;
+	} catch {
+		logAuthError("OAuth refresh request threw an exception");
 		return null;
 	}
+}
+
+export async function refreshAccessToken(env: Env): Promise<TokenData | null> {
+	if (!refreshInFlight) {
+		refreshInFlight = refreshStoredAuth(env).finally(() => {
+			refreshInFlight = null;
+		});
+	}
+	return refreshInFlight;
 }
 
 export async function getRefreshedAuth(env: Env): Promise<{ accessToken: string | null; accountId: string | null }> {
-	// First try to get current auth
-	const currentAuth = await getEffectiveChatgptAuth(env);
+	const auth = await loadStoredAuth(env, true);
+	if (!auth) return { accessToken: null, accountId: null };
+	if (!needsRefresh(auth)) return { accessToken: auth.tokens.access_token, accountId: accountIdFor(auth.tokens) };
 
-	if (!currentAuth.accessToken) {
-		return currentAuth;
-	}
-
-	// Check if token needs refresh (older than 28 days or if we have KV storage with newer tokens)
-	let needsRefresh = false;
-
-	if (env.OPENAI_CODEX_AUTH) {
-		try {
-			const auth: AuthDotJson = JSON.parse(env.OPENAI_CODEX_AUTH);
-			if (auth.last_refresh) {
-				const lastRefresh = new Date(auth.last_refresh);
-				const daysSinceRefresh = (Date.now() - lastRefresh.getTime()) / (1000 * 60 * 60 * 24);
-				if (daysSinceRefresh > 28) {
-					needsRefresh = true;
-				}
-			}
-		} catch (e) {
-			console.error("Error checking refresh time:", e);
-		}
-	}
-
-	// Check KV for newer tokens
-	if (env.KV && !needsRefresh) {
-		try {
-			const kvLastRefresh = await env.KV.get("auth_last_refresh");
-			if (kvLastRefresh) {
-				const kvRefreshTime = new Date(kvLastRefresh);
-				if (kvRefreshTime.getTime() > Date.now() - 28 * 24 * 60 * 60 * 1000) {
-					// KV has newer tokens, use those
-					const kvTokens = await env.KV.get("auth_tokens", "json");
-					if (kvTokens) {
-						const tokens = kvTokens as TokenData;
-						return {
-							accessToken: tokens.access_token,
-							accountId: tokens.account_id || null
-						};
-					}
-				}
-			}
-		} catch (e) {
-			console.error("Error checking KV for tokens:", e);
-		}
-	}
-
-	// Refresh if needed
-	if (needsRefresh) {
-		const refreshedTokens = await refreshAccessToken(env);
-		if (refreshedTokens) {
-			return {
-				accessToken: refreshedTokens.access_token,
-				accountId: refreshedTokens.account_id || null
-			};
-		}
-	}
-
-	return currentAuth;
+	const refreshed = await refreshAccessToken(env);
+	const tokens = refreshed || auth.tokens;
+	return { accessToken: tokens.access_token, accountId: accountIdFor(tokens) };
 }
