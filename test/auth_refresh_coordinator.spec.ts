@@ -105,6 +105,51 @@ describe("AuthRefreshCoordinator", () => {
 		expect(await response.json()).toMatchObject({ access_token: "new", generation: 2 });
 	});
 
+	it("preserves fresh semantics when queued behind a blocked get", async () => {
+		const storage = createStorage();
+		const now = Date.parse("2026-08-19T03:04:05.000Z");
+		const expiredAuth = {
+			tokens: { access_token: "old", refresh_token: "refresh", account_id: "account-a" },
+			lastRefresh: new Date(0).toISOString(),
+			expiresAt: new Date(0).toISOString()
+		};
+		storage.values.set("credential", { generation: 1, fingerprint: "old", auth: expiredAuth });
+		let releaseGet!: () => void;
+		const getGate = new Promise<void>((resolve) => (releaseGet = resolve));
+		let getStarted!: () => void;
+		const getStart = new Promise<void>((resolve) => (getStarted = resolve));
+		storage.get.mockImplementationOnce(async () => {
+			getStarted();
+			await getGate;
+			return storage.values.get("credential");
+		});
+		const state = {
+			storage,
+			blockConcurrencyWhile: vi.fn(async (operation: () => Promise<unknown>) => operation())
+		} as unknown as DurableObjectState;
+		const env = { CHATGPT_LOCAL_CLIENT_ID: "client-id" } as unknown as Env;
+		const fetchMock = vi.fn(async () => new Response(JSON.stringify({ access_token: "fresh" })));
+		vi.stubGlobal("fetch", fetchMock);
+		const coordinator = new AuthRefreshCoordinator(state, env);
+
+		const coordinate = (
+			coordinator as unknown as {
+				coordinate(input: { operation: "get" | "fresh"; now: number; force: boolean; source: typeof expiredAuth }): Promise<{
+					auth: typeof expiredAuth;
+				}>;
+			}
+		).coordinate.bind(coordinator);
+		const weakGet = coordinate({ operation: "get", now, force: false, source: expiredAuth });
+		await getStart;
+		while (!(coordinator as unknown as { refreshInFlight: unknown }).refreshInFlight) await Promise.resolve();
+		const fresh = coordinate({ operation: "fresh", now, force: false, source: expiredAuth });
+		releaseGet();
+
+		await expect(weakGet).resolves.toMatchObject({ auth: { tokens: { access_token: "old" } } });
+		await expect(fresh).resolves.toMatchObject({ auth: { tokens: { access_token: "fresh" } } });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
 	it("does not commit a refresh result when the durable generation changed", async () => {
 		const storage = createStorage();
 		const oldAuth = {

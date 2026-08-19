@@ -1,12 +1,13 @@
 import { authFingerprint, loadBootstrap, needsRefresh, projectToKv, requestRefresh } from "./auth_store";
-import type { DurableCredential, RefreshCoordinationRequest } from "./auth_store";
+import type { AuthOperation, DurableCredential, RefreshCoordinationRequest } from "./auth_store";
 import type { Env } from "./types";
 
 const CREDENTIAL_KEY = "credential";
+const OPERATION_STRENGTH: Record<AuthOperation, number> = { get: 0, fresh: 1, refresh: 2 };
 
 export class AuthRefreshCoordinator {
 	private refreshInFlight: {
-		operation: "get" | "fresh" | "refresh";
+		operation: AuthOperation;
 		promise: Promise<DurableCredential>;
 	} | null = null;
 
@@ -26,7 +27,7 @@ export class AuthRefreshCoordinator {
 		const operation = input.operation || (input.force ? "refresh" : "fresh");
 		const active = this.refreshInFlight;
 		if (active) {
-			if (operation !== "refresh" || active.operation === "refresh") return active.promise;
+			if (OPERATION_STRENGTH[operation] <= OPERATION_STRENGTH[active.operation]) return active.promise;
 			await active.promise;
 			return this.coordinate(input);
 		}

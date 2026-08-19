@@ -8,8 +8,9 @@ const EXPIRY_SKEW_MS = 60 * 1000;
 
 export type StoredAuth = { tokens: TokenData; lastRefresh: string | null; expiresAt: string | null };
 export type CodexAuth = StoredAuth & { accessToken: string | null; accountId: string | null; generation?: number };
+export type AuthOperation = "get" | "fresh" | "refresh";
 export type RefreshCoordinationRequest = {
-	operation?: "get" | "fresh" | "refresh";
+	operation?: AuthOperation;
 	now: number;
 	force: boolean;
 	observedGeneration?: number;
@@ -18,10 +19,11 @@ export type RefreshCoordinationRequest = {
 export type DurableCredential = { generation: number; fingerprint: string; auth: StoredAuth };
 
 type InFlightOperation = {
-	operation: "get" | "fresh" | "refresh";
+	operation: AuthOperation;
 	promise: Promise<DurableCredential | null>;
 };
 const refreshesInFlight = new Map<string, InFlightOperation>();
+const OPERATION_STRENGTH: Record<AuthOperation, number> = { get: 0, fresh: 1, refresh: 2 };
 type JwtClaims = { "https://api.openai.com/auth"?: { chatgpt_account_id?: string } } & Record<string, unknown>;
 
 export function logRefresh(account: string, errorClass: string, status?: number): void {
@@ -199,12 +201,12 @@ async function coordinate(
 	env: Env,
 	source: StoredAuth,
 	now: number,
-	operation: "get" | "fresh" | "refresh"
+	operation: AuthOperation
 ): Promise<DurableCredential | null> {
 	const accountKey = await accountKeyFor(source.tokens);
 	const active = refreshesInFlight.get(accountKey);
 	if (active) {
-		if (operation !== "refresh" || active.operation === "refresh") return active.promise;
+		if (OPERATION_STRENGTH[operation] <= OPERATION_STRENGTH[active.operation]) return active.promise;
 		await active.promise;
 		const current = await loadBootstrap(env, now, false);
 		return current ? coordinate(env, current, now, operation) : null;

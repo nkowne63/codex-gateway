@@ -150,6 +150,35 @@ describe("Codex auth store", () => {
 		expect(second.accessToken).toBe("refreshed-access-token");
 	});
 
+	it("preserves fresh semantics when queued behind a blocked get within an isolate", async () => {
+		const now = Date.parse("2026-08-19T03:04:05.000Z");
+		const kv = createKv({
+			auth_tokens: JSON.stringify(fallbackTokens),
+			auth_last_refresh: new Date(0).toISOString(),
+			auth_expires_at: new Date(0).toISOString()
+		});
+		let releaseGet!: () => void;
+		const getGate = new Promise<void>((resolve) => (releaseGet = resolve));
+		const baseGet = kv.get.getMockImplementation()!;
+		let tokenReads = 0;
+		kv.get.mockImplementation(async (key: string, type?: "json") => {
+			if (key === "auth_tokens" && ++tokenReads === 2) await getGate;
+			return baseGet(key, type);
+		});
+		const fetchMock = vi.fn(async () => new Response(JSON.stringify({ access_token: "fresh-access-token" })));
+		vi.stubGlobal("fetch", fetchMock);
+		const env = createEnv(kv);
+
+		const weakGet = AuthStore.get(env);
+		while (tokenReads < 2) await Promise.resolve();
+		const fresh = AuthStore.getFresh(env, now);
+		releaseGet();
+
+		await expect(weakGet).resolves.toMatchObject({ accessToken: "fallback-access-token" });
+		await expect(fresh).resolves.toMatchObject({ accessToken: "fresh-access-token" });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
 	it("reloads rotated credentials before a forced refresh queued behind a weak fresh operation", async () => {
 		const now = Date.parse("2026-08-19T03:04:05.000Z");
 		const kv = createKv({
