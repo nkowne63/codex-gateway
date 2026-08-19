@@ -20,7 +20,9 @@ interface SseEvent {
 const SAFE_ERROR = { message: "Upstream request failed" };
 const SAFE_ERROR_MESSAGE = SAFE_ERROR.message;
 
-const ERROR_TEXT_KEY = /^(?:error|raw_error|upstream_error|error_message|message|details|code)$/i;
+const ERROR_CONTAINER_KEY = /^(?:error|raw_error|upstream_error|error_message)$/i;
+const ERROR_TEXT_KEY = /^(?:message|details|code)$/i;
+const AUTHORITATIVE_RESPONSE_KEY = /^(?:response|metadata|output|incomplete_details|usage)$/i;
 const TOKEN_VALUE =
 	/(?:Bearer\s+\S+|\b(?:access|refresh|auth|oauth|api|bearer|jwt|token)[-_][A-Za-z0-9._-]+|\bjwt\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b|\bsk-[A-Za-z0-9_-]+\b)/gi;
 
@@ -36,16 +38,22 @@ function isSensitiveKey(key: string): boolean {
 	);
 }
 
-function sanitizeValue(value: unknown, key?: string, errorText = false): unknown {
+function sanitizeValue(value: unknown, key?: string, errorContext = false): unknown {
 	if (key && isSensitiveKey(key)) return undefined;
-	const nestedErrorText = errorText || Boolean(key && ERROR_TEXT_KEY.test(key));
-	if (typeof value === "string") return sanitizeString(value, nestedErrorText);
-	if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, undefined, errorText));
+	const inheritedErrorContext = Boolean(key && AUTHORITATIVE_RESPONSE_KEY.test(key)) ? false : errorContext;
+	const nestedErrorContext = inheritedErrorContext || Boolean(key && ERROR_CONTAINER_KEY.test(key));
+	if (typeof value === "string") {
+		const errorText = Boolean(key && (ERROR_TEXT_KEY.test(key) || ERROR_CONTAINER_KEY.test(key)));
+		return sanitizeString(value, nestedErrorContext && errorText);
+	}
+	if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, undefined, nestedErrorContext));
 	if (!value || typeof value !== "object") return value;
+	const objectErrorContext =
+		nestedErrorContext || isErrorLike((value as Record<string, unknown>).type);
 
 	const sanitized: Record<string, unknown> = {};
 	for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
-		const safeValue = sanitizeValue(nestedValue, nestedKey, nestedErrorText);
+		const safeValue = sanitizeValue(nestedValue, nestedKey, objectErrorContext);
 		if (safeValue !== undefined) sanitized[nestedKey] = safeValue;
 	}
 	return sanitized;

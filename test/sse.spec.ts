@@ -65,6 +65,41 @@ describe("SSE redaction and framing", () => {
 			expect(body).not.toContain(secret);
 	});
 
+	it("preserves safe metadata diagnostics while redacting credentials in nested errors", async () => {
+		const event = {
+			type: "response.completed",
+			response: {
+				metadata: {
+					message: "safe metadata message",
+					code: "safe_metadata_code",
+					details: "safe metadata details"
+				},
+				output: [{ type: "message", code: "safe_output_code", content: [] }],
+				incomplete_details: { reason: "max_output_tokens" },
+				error: {
+					message: "upstream diagnostic",
+					code: "upstream_code",
+					context: { access_token: "nested-secret", note: "Bearer nested-bearer-secret" }
+				}
+			}
+		};
+		const body = await new Response(
+			await sseTranslateResponses(new Response(`data: ${JSON.stringify(event)}\n\n`))
+		).text();
+		const sanitized = JSON.parse(body.match(/^data: (.+)$/m)![1]);
+
+		expect(sanitized.response.metadata).toEqual(event.response.metadata);
+		expect(sanitized.response.output).toEqual(event.response.output);
+		expect(sanitized.response.incomplete_details).toEqual(event.response.incomplete_details);
+		expect(sanitized.response.error).toEqual({
+			message: "Upstream request failed",
+			code: "Upstream request failed",
+			context: { note: "[REDACTED]" }
+		});
+		expect(body).not.toContain("nested-secret");
+		expect(body).not.toContain("nested-bearer-secret");
+	});
+
 	it.each([
 		["chat", sseTranslateChat],
 		["completion", sseTranslateText]
