@@ -75,8 +75,9 @@ describe("upstream authentication", () => {
 			)
 		);
 
-		await startUpstreamRequest(env, "gpt-5", [{ type: "message", role: "user", content: "body-token" }]);
+		const result = await startUpstreamRequest(env, "gpt-5", [{ type: "message", role: "user", content: "body-token" }]);
 		const logged = errorSpy.mock.calls.flat().join(" ");
+		const response = await result.error!.text();
 
 		expect(logged).toContain("status=500");
 		expect(logged).toContain("url=chatgpt.com/backend-api/codex/responses");
@@ -87,7 +88,36 @@ describe("upstream authentication", () => {
 			"response-header-token",
 			"query-token",
 			"body-token"
-		])
+		]) {
 			expect(logged).not.toContain(secret);
+			expect(response).not.toContain(secret);
+		}
+		expect(response).toContain("Upstream request failed");
+	});
+
+	it("redacts an access token from thrown-fetch responses and logs", async () => {
+		const env = {
+			KV: createKv(),
+			OPENAI_API_KEY: "client-key",
+			CHATGPT_LOCAL_CLIENT_ID: "client-id",
+			CHATGPT_RESPONSES_URL: "https://chatgpt.com/backend-api/codex/responses"
+		} as Env;
+		const accessToken = "stale-token";
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) => {
+				if (url === env.CHATGPT_RESPONSES_URL) throw new Error(`socket failed with ${accessToken}`);
+				return new Response("instructions");
+			})
+		);
+
+		const result = await startUpstreamRequest(env, "gpt-5", []);
+		const response = await result.error!.text();
+		const logged = errorSpy.mock.calls.flat().join(" ");
+
+		expect(response).not.toContain(accessToken);
+		expect(logged).not.toContain(accessToken);
+		expect(response).toContain("Upstream request failed");
 	});
 });

@@ -1,8 +1,11 @@
-import { refreshSerialized, type RefreshCoordinationRequest } from "./auth_kv";
+import { authFingerprint, loadBootstrap, needsRefresh, projectToKv, requestRefresh } from "./auth_store";
+import type { DurableCredential, RefreshCoordinationRequest } from "./auth_store";
 import type { Env } from "./types";
 
+const CREDENTIAL_KEY = "credential";
+
 export class AuthRefreshCoordinator {
-	private refreshInFlight: Promise<Awaited<ReturnType<typeof refreshSerialized>>> | null = null;
+	private refreshInFlight: Promise<DurableCredential> | null = null;
 
 	constructor(
 		private readonly state: DurableObjectState,
@@ -12,14 +15,35 @@ export class AuthRefreshCoordinator {
 	async fetch(request: Request): Promise<Response> {
 		if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 		if (!this.refreshInFlight) {
-			this.refreshInFlight = (async () => {
-				const coordination = (await request.json()) as RefreshCoordinationRequest;
-				return this.state.blockConcurrencyWhile(() => refreshSerialized(this.env, coordination));
-			})().finally(() => {
-				this.refreshInFlight = null;
-			});
+			this.refreshInFlight = this.state
+				.blockConcurrencyWhile(async () => {
+					const input = (await request.json()) as RefreshCoordinationRequest;
+					input.source ||= (await loadBootstrap(this.env, input.now))!;
+					let current = await this.state.storage.get<DurableCredential>(CREDENTIAL_KEY);
+					if (!current) {
+						current = { generation: 1, fingerprint: authFingerprint(input.source), auth: input.source };
+						await this.state.storage.put(CREDENTIAL_KEY, current);
+					}
+					if (input.observedGeneration !== undefined && input.observedGeneration !== current.generation) return current;
+					if (input.operation === "get" || (!input.force && !needsRefresh(current.auth, input.now))) return current;
+					const generation = current.generation;
+					const account = current.auth.tokens.account_id
+						? `account:${current.auth.tokens.account_id}`
+						: "account:unknown";
+					const updated = await requestRefresh(this.env, current.auth, input.now, account);
+					if (!updated) return current;
+					const latest = await this.state.storage.get<DurableCredential>(CREDENTIAL_KEY);
+					if (!latest || latest.generation !== generation) return latest || current;
+					const committed = { generation: generation + 1, fingerprint: authFingerprint(updated), auth: updated };
+					await this.state.storage.put(CREDENTIAL_KEY, committed);
+					await projectToKv(this.env, updated, input.now);
+					return committed;
+				})
+				.finally(() => {
+					this.refreshInFlight = null;
+				});
 		}
-		const tokens = await this.refreshInFlight;
-		return Response.json(tokens);
+		const record = await this.refreshInFlight;
+		return Response.json({ ...record, ...record.auth, ...record.auth.tokens });
 	}
 }

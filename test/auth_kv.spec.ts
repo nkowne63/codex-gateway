@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthStore, getRefreshedAuth, refreshAccessToken } from "../src/auth_kv";
+import { getRefreshedAuth, refreshAccessToken } from "../src/auth_kv";
+import { AuthStore } from "../src/auth_store";
 import type { Env } from "../src/types";
 
 const AUTH_URL = "https://auth.openai.com/oauth/token";
@@ -56,11 +57,24 @@ describe("Codex auth store", () => {
 		});
 		vi.stubGlobal("fetch", vi.fn());
 
-		await expect(AuthStore.getFresh(createEnv(kv), now)).resolves.toEqual({
+		await expect(AuthStore.getFresh(createEnv(kv), now)).resolves.toMatchObject({
 			accessToken: "fallback-access-token",
-			accountId: "fallback-account"
+			accountId: "fallback-account",
+			tokens: fallbackTokens,
+			lastRefresh: new Date(0).toISOString(),
+			expiresAt: new Date(now + 60 * 60 * 1000).toISOString()
 		});
 		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it("uses the supplied time when seeding first-boot credentials", async () => {
+		const kv = createKv();
+		const now = Date.parse("2026-08-19T03:04:05.000Z");
+		const env = createEnv(kv, { tokens: fallbackTokens } as never);
+
+		await AuthStore.getFresh(env, now);
+
+		expect(kv.values.get("auth_last_refresh")).toBe("2026-08-19T03:04:05.000Z");
 	});
 
 	it("prefers persisted KV credentials over the deployment fallback", async () => {
@@ -199,8 +213,10 @@ describe("Codex auth store", () => {
 		);
 
 		await expect(refreshAccessToken(createEnv(kv))).resolves.toBeNull();
-		expect(errorSpy.mock.calls.flat().join(" ")).not.toContain("fallback-refresh-token");
-		expect(errorSpy.mock.calls.flat().join(" ")).not.toContain("returned-id-token");
+		const logged = errorSpy.mock.calls.flat().join(" ");
+		expect(logged).toContain("auth_refresh account=fallback-acc error_class=invalid_response");
+		expect(logged).not.toContain("fallback-refresh-token");
+		expect(logged).not.toContain("returned-id-token");
 	});
 
 	it("removes stale expiry metadata when refresh omits expires_in", async () => {

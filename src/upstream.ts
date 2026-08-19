@@ -1,5 +1,5 @@
 import { normalizeModelName } from "./utils";
-import { AuthStore } from "./auth_kv";
+import { AuthStore } from "./auth_store";
 import { getInstructionsForModel } from "./instructions";
 import { Env, InputItem, Tool } from "./types"; // Import types
 
@@ -11,14 +11,6 @@ type ReasoningParam = {
 type ToolChoice = "auto" | "none" | { type: string; function: { name: string } };
 
 type OllamaPayload = Record<string, unknown>;
-
-type ErrorBody = {
-	error?: {
-		message: string;
-	};
-	raw?: string;
-	[key: string]: unknown;
-};
 
 function safeUpstreamLocation(requestUrl: string): string {
 	try {
@@ -135,10 +127,6 @@ export async function startUpstreamRequest(
 
 		if (!upstreamResponse.ok) {
 			// Handle HTTP errors from upstream
-			const errorBody = (await upstreamResponse
-				.json()
-				.catch(() => ({ raw: upstreamResponse.statusText }))) as ErrorBody;
-
 			logUpstreamError(upstreamResponse.status, requestUrl, "kind=http method=POST");
 
 			// Check if it's a 401 Unauthorized and we can refresh the token
@@ -176,7 +164,7 @@ export async function startUpstreamRequest(
 				error: new Response(
 					JSON.stringify({
 						error: {
-							message: (errorBody.error && errorBody.error.message) || "Upstream error"
+							message: "Upstream request failed"
 						}
 					}),
 					{ status: upstreamResponse.status, headers: { "Content-Type": "application/json" } }
@@ -185,7 +173,7 @@ export async function startUpstreamRequest(
 		}
 
 		return { response: upstreamResponse, error: null };
-	} catch (e: unknown) {
+	} catch {
 		logUpstreamError("fetch-failed", requestUrl, "kind=network method=POST");
 
 		return {
@@ -193,7 +181,7 @@ export async function startUpstreamRequest(
 			error: new Response(
 				JSON.stringify({
 					error: {
-						message: `Upstream ChatGPT request failed: ${e instanceof Error ? e.message : String(e)}`
+						message: "Upstream request failed"
 					}
 				}),
 				{ status: 502, headers: { "Content-Type": "application/json" } }
