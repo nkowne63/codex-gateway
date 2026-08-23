@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 
 # --- KV Namespaces ---
 kv_namespaces = [
-  { binding = "KV", id = "2e33dd7fc260405d906d61636cb82b61" }
+  { binding = "KV", id = "b12d6bf32db5421abb0dbe86ca1b9b2e" }
 ]
 
 [[durable_objects.bindings]]
