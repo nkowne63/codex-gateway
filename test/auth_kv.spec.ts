@@ -35,6 +35,7 @@ function createEnv(
 ) {
 	return {
 		KV: kv,
+		GATEWAY_BEARER_TOKEN: "gateway-secret",
 		OPENAI_API_KEY: "client-key",
 		CHATGPT_LOCAL_CLIENT_ID: "client-id",
 		CHATGPT_RESPONSES_URL: "https://chatgpt.com/backend-api/codex/responses",
@@ -148,6 +149,29 @@ describe("Codex auth store", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(first.accessToken).toBe("refreshed-access-token");
 		expect(second.accessToken).toBe("refreshed-access-token");
+	});
+
+	it("does not send gateway authentication headers to the external OAuth token endpoint", async () => {
+		const kv = createKv({
+			auth_tokens: JSON.stringify(fallbackTokens),
+			auth_last_refresh: new Date(0).toISOString(),
+			auth_expires_at: new Date(0).toISOString()
+		});
+		const fetchMock = vi.fn(async () => {
+			return new Response(JSON.stringify({ access_token: "refreshed-access-token" }));
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const refreshed = await AuthStore.refresh(createEnv(kv), Date.now());
+		const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+		expect(headers.get("X-Internal-Auth")).toBeNull();
+		expect(headers.get("Authorization")).toBeNull();
+		expect(headers.get("GATEWAY_BEARER_TOKEN")).toBeNull();
+		expect(fetchMock).toHaveBeenCalledWith(
+			AUTH_URL,
+			expect.objectContaining({ headers: expect.anything() })
+		);
+		expect(refreshed.accessToken).toBe("refreshed-access-token");
 	});
 
 	it("preserves fresh semantics when queued behind a blocked get within an isolate", async () => {

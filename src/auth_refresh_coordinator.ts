@@ -18,6 +18,8 @@ export class AuthRefreshCoordinator {
 
 	async fetch(request: Request): Promise<Response> {
 		if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+		if (this.env.GATEWAY_BEARER_TOKEN && request.headers.get("X-Internal-Auth") !== this.env.GATEWAY_BEARER_TOKEN)
+			return new Response("Forbidden", { status: 403 });
 		const input = (await request.json()) as RefreshCoordinationRequest;
 		const record = await this.coordinate(input);
 		return Response.json({ ...record, ...record.auth, ...record.auth.tokens });

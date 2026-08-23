@@ -4,6 +4,9 @@
 declare namespace Cloudflare {
 	interface Env {
 		KV: KVNamespace;
+		AUTH_REFRESH_COORDINATOR: DurableObjectNamespace;
+		OAUTH_LOGIN_COORDINATOR: DurableObjectNamespace;
+		GATEWAY_BEARER_TOKEN: string;
 		OPENAI_API_KEY: string;
 		CHATGPT_LOCAL_CLIENT_ID: string;
 		CHATGPT_RESPONSES_URL: string;

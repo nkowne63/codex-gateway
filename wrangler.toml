@@ -13,9 +13,17 @@ kv_namespaces = [
 name = "AUTH_REFRESH_COORDINATOR"
 class_name = "AuthRefreshCoordinator"
 
+[[durable_objects.bindings]]
+name = "OAUTH_LOGIN_COORDINATOR"
+class_name = "OAuthLoginCoordinator"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AuthRefreshCoordinator"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["OAuthLoginCoordinator"]
 
 
 # --- Local Development Configuration ---

@@ -1,10 +1,10 @@
-# OpenAI API Key Authentication
+# Gateway Authentication
 
-The codex-openai-wrapper now includes OpenAI API key authentication middleware to secure access to the proxy endpoints.
+The proxy authenticates clients with a dedicated gateway bearer token. The upstream OAuth credentials are separate and are never accepted as the client credential.
 
 ## Overview
 
-All API endpoints (`/v1/*` and `/api/*`) now require a valid OpenAI API key to be provided in the Authorization header. This ensures that only authorized clients can use the proxy service.
+All API endpoints (`/v1/*` and `/api/*`) require `GATEWAY_BEARER_TOKEN` in the Authorization header.
 
 ## Configuration
 
@@ -13,20 +13,20 @@ All API endpoints (`/v1/*` and `/api/*`) now require a valid OpenAI API key to b
 Add the following environment variable to your `.dev.vars` file (for local development) or Cloudflare Workers environment:
 
 ```
-OPENAI_API_KEY=sk-your-openai-api-key-here
+GATEWAY_BEARER_TOKEN=replace-with-a-long-random-secret
 ```
 
-This is the API key that clients must provide to access the endpoints.
+`OPENAI_API_KEY` is not used as the client authentication token.
 
 ### Cloudflare Workers Deployment
 
 When deploying to Cloudflare Workers, set the environment variable using:
 
 ```bash
-wrangler secret put OPENAI_API_KEY
+wrangler secret put GATEWAY_BEARER_TOKEN
 ```
 
-Then enter your OpenAI API key when prompted.
+Then enter the gateway token when prompted.
 
 ## Client Usage
 
@@ -35,7 +35,7 @@ Then enter your OpenAI API key when prompted.
 All requests to the proxy endpoints must include an Authorization header with the Bearer token format:
 
 ```
-Authorization: Bearer sk-your-openai-api-key-here
+Authorization: Bearer <GATEWAY_BEARER_TOKEN>
 ```
 
 ### Example Requests
@@ -44,7 +44,7 @@ Authorization: Bearer sk-your-openai-api-key-here
 
 ```bash
 curl -X POST https://your-worker.your-subdomain.workers.dev/v1/chat/completions \
-  -H "Authorization: Bearer sk-your-openai-api-key-here" \
+  -H "Authorization: Bearer <GATEWAY_BEARER_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-4",
@@ -56,7 +56,7 @@ curl -X POST https://your-worker.your-subdomain.workers.dev/v1/chat/completions 
 
 ```bash
 curl -X POST https://your-worker.your-subdomain.workers.dev/api/chat \
-  -H "Authorization: Bearer sk-your-openai-api-key-here" \
+  -H "Authorization: Bearer <GATEWAY_BEARER_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "llama2",
@@ -110,11 +110,11 @@ curl -X POST https://your-worker.your-subdomain.workers.dev/api/chat \
 ```
 **Status Code:** 500 Internal Server Error
 
-This occurs when the `OPENAI_API_KEY` environment variable is not configured on the server.
+This occurs when the `GATEWAY_BEARER_TOKEN` environment variable is not configured on the server.
 
 ## Security Notes
 
-1. **Keep API Keys Secure**: Never expose your OpenAI API key in client-side code or public repositories.
+1. **Keep credentials secure**: Never expose the gateway token or upstream OAuth credentials in client-side code or public repositories.
 
 2. **Use Environment Variables**: Always store API keys in environment variables, never hardcode them.
 
@@ -129,4 +129,4 @@ The following endpoints do **NOT** require authentication:
 - `GET /` - Root endpoint with service information
 - `GET /health` - Health check endpoint
 
-All other endpoints require valid OpenAI API key authentication.
+All other endpoints require `GATEWAY_BEARER_TOKEN`. The browser UI is available at `/oauth/login`. Use `GET /oauth/login/url` to create a PKCE authorization URL and paste the resulting callback URL into the UI; `POST /oauth/callback` exchanges it. The gateway token is supplied only in the request header and is never placed in URLs, HTML, KV, or logs.

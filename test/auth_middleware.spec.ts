@@ -22,7 +22,7 @@ describe("openaiAuthMiddleware", () => {
 					method: "POST",
 					headers: authorization ? { Authorization: authorization } : undefined
 				}),
-				{ OPENAI_API_KEY: "client-key" } as Env
+				{ GATEWAY_BEARER_TOKEN: "client-key" } as Env
 			);
 
 			expect(response.status).toBe(401);
@@ -36,7 +36,7 @@ describe("openaiAuthMiddleware", () => {
 				method: "POST",
 				headers: { Authorization: "Bearer client-key" }
 			}),
-			{ OPENAI_API_KEY: "client-key" } as Env
+			{ GATEWAY_BEARER_TOKEN: "client-key" } as Env
 		);
 
 		expect(await response.json()).toEqual({ reached: true });
@@ -44,7 +44,7 @@ describe("openaiAuthMiddleware", () => {
 
 	it("protects the Ollama tags route with the same rejection response", async () => {
 		const response = await ollama.fetch(new Request("https://gateway.test/tags"), {
-			OPENAI_API_KEY: "client-key"
+			GATEWAY_BEARER_TOKEN: "client-key"
 		} as Env);
 
 		expect(response.status).toBe(401);
@@ -62,7 +62,7 @@ describe("openaiAuthMiddleware", () => {
 		[ollama, "GET", "/tags"]
 	] as const)("protects public route %s %s", async (router, method, path) => {
 		const response = await router.fetch(new Request(`https://gateway.test${path}`, { method }), {
-			OPENAI_API_KEY: "client-key"
+			GATEWAY_BEARER_TOKEN: "client-key"
 		} as Env);
 		expect(response.status).toBe(401);
 		expect(await response.json()).toEqual({ error: { message: "Unauthorized" } });

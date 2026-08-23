@@ -5,6 +5,9 @@
 # This key is required for clients to access the proxy endpoints
 OPENAI_API_KEY=sk-your-openai-api-key-here
 
+# Dedicated gateway credential for API and OAuth management routes
+GATEWAY_BEARER_TOKEN=replace-with-a-long-random-secret
+
 # ChatGPT API Configuration
 CHATGPT_LOCAL_CLIENT_ID=your_client_id_here
 CHATGPT_RESPONSES_URL=https://chatgpt.com/backend-api/codex/responses

@@ -216,7 +216,10 @@ async function coordinate(
 			const stub = env.AUTH_REFRESH_COORDINATOR.get(env.AUTH_REFRESH_COORDINATOR.idFromName(accountKey));
 			const response = await stub.fetch("https://auth-refresh.internal/credential", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: {
+					"Content-Type": "application/json",
+					...(env.GATEWAY_BEARER_TOKEN ? { "X-Internal-Auth": env.GATEWAY_BEARER_TOKEN } : {})
+				},
 				body: JSON.stringify({
 					operation,
 					now,

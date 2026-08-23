@@ -13,6 +13,8 @@ export type InputItemType = "message" | "function_call" | "function_call_output"
 export interface Env {
 	KV?: KVNamespace; // Optional KV namespace for token storage
 	AUTH_REFRESH_COORDINATOR?: DurableObjectNamespace;
+	OAUTH_LOGIN_COORDINATOR?: DurableObjectNamespace;
+	GATEWAY_BEARER_TOKEN: string;
 	OPENAI_API_KEY: string;
 	CHATGPT_LOCAL_CLIENT_ID: string;
 	CHATGPT_RESPONSES_URL: string;

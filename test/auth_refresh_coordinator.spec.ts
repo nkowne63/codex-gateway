@@ -61,6 +61,19 @@ describe("AuthRefreshCoordinator", () => {
 		});
 	});
 
+	it("does not expose credential fields from its HTTP response", async () => {
+		const storage = createStorage();
+		const state = { storage, blockConcurrencyWhile: vi.fn(async (operation: () => Promise<unknown>) => operation()) } as unknown as DurableObjectState;
+		const env = { CHATGPT_LOCAL_CLIENT_ID: "client-id", GATEWAY_BEARER_TOKEN: "internal" } as unknown as Env;
+		const coordinator = new AuthRefreshCoordinator(state, env);
+		const response = await coordinator.fetch(new Request("https://internal/refresh", {
+			method: "POST",
+			body: JSON.stringify({ operation: "get", now: Date.now(), force: false, source: { tokens: { access_token: "secret", refresh_token: "refresh" }, lastRefresh: new Date().toISOString(), expiresAt: null } })
+		}));
+		expect(response.status).toBe(403);
+		expect(await response.text()).not.toContain("secret");
+	});
+
 	it("queues a forced refresh behind a weak read and returns the refreshed token", async () => {
 		const storage = createStorage();
 		const oldAuth = {

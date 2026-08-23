@@ -8,6 +8,7 @@ import responses from "../src/routes/responses";
 import { mapModelId } from "../src/model_mapping";
 
 const env = {
+	GATEWAY_BEARER_TOKEN: "client-key",
 	OPENAI_API_KEY: "client-key",
 	CHATGPT_LOCAL_CLIENT_ID: "client-id",
 	CHATGPT_RESPONSES_URL: "https://example.test/responses",
