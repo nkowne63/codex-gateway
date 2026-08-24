@@ -56,6 +56,10 @@ export async function startUpstreamRequest(
 			const shimPayload = JSON.parse(options.rawResponsesBody) as Record<string, unknown>;
 			const logicalModel = typeof shimPayload.model === "string" ? shimPayload.model : model;
 			shimPayload.model = CODEX_SHIM_MODEL;
+			// The shim emits the Responses event stream only when requested. The
+			// public endpoint may be non-streaming, but responseJson() below needs
+			// the terminal event to materialize that response for the caller.
+			shimPayload.stream = true;
 			const upstreamResponse = await env.CODEX_SHIM.fetch(
 				new Request("http://codex-shim.internal/v1/responses", {
 					method: "POST",

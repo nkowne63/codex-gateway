@@ -44,6 +44,20 @@ describe("upstream authentication", () => {
 		expect(shimFetch).toHaveBeenCalledOnce();
 	});
 
+	it("forces streaming on the private shim for non-streaming public Responses calls", async () => {
+		const body = JSON.stringify({ model: "gpt-5.6-luna", input: "hello", stream: false });
+		const shimFetch = vi.fn(async (request: Request) => {
+			const payload = (await request.json()) as Record<string, unknown>;
+			expect(payload.stream).toBe(true);
+			return new Response("ok", { status: 200 });
+		});
+		const env = { CODEX_SHIM: { fetch: shimFetch } } as unknown as Env;
+
+		const result = await startUpstreamRequest(env, "gpt-5.6-luna", [], { rawResponsesBody: body });
+
+		expect(result.response?.status).toBe(200);
+	});
+
 	it("preserves supported Responses fields while overriding gateway-controlled fields", async () => {
 		const env = {
 			KV: createKv(),
