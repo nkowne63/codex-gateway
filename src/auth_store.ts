@@ -66,12 +66,30 @@ function validDate(value: unknown): string | null {
 	return typeof value === "string" && !Number.isNaN(Date.parse(value)) ? value : null;
 }
 
+function jwtExpiry(tokens: TokenData): string | null {
+	for (const token of [tokens.access_token, tokens.id_token]) {
+		if (!token || token.split(".").length !== 3) continue;
+		try {
+			const payload = JSON.parse(decode(token.split(".")[1])) as { exp?: unknown };
+			if (typeof payload.exp === "number" && Number.isFinite(payload.exp) && payload.exp > 0)
+				return new Date(payload.exp * 1000).toISOString();
+		} catch {
+			/* Try the other token or use the refresh interval fallback. */
+		}
+	}
+	return null;
+}
+
 function fallback(env: Env): StoredAuth | null {
 	if (!env.OPENAI_CODEX_AUTH) return null;
 	try {
 		const auth = JSON.parse(env.OPENAI_CODEX_AUTH) as AuthDotJson;
 		if (!isTokenData(auth.tokens)) return null;
-		return { tokens: auth.tokens, lastRefresh: validDate(auth.last_refresh), expiresAt: validDate(auth.expires_at) };
+		return {
+			tokens: auth.tokens,
+			lastRefresh: validDate(auth.last_refresh),
+			expiresAt: validDate(auth.expires_at) || jwtExpiry(auth.tokens)
+		};
 	} catch {
 		return null;
 	}
@@ -85,7 +103,7 @@ export async function loadBootstrap(env: Env, now: number, seed = true): Promise
 				return {
 					tokens,
 					lastRefresh: validDate(await env.KV.get(AUTH_LAST_REFRESH_KEY)),
-					expiresAt: validDate(await env.KV.get(AUTH_EXPIRES_AT_KEY))
+					expiresAt: validDate(await env.KV.get(AUTH_EXPIRES_AT_KEY)) || jwtExpiry(tokens)
 				};
 		} catch {
 			/* fall through */
@@ -159,25 +177,34 @@ export async function requestRefresh(
 			logRefresh(accountKey, "invalid_json");
 			return null;
 		}
-		if (typeof refreshed.access_token !== "string" || !refreshed.access_token) {
+		const returnedTokens = (refreshed.tokens && typeof refreshed.tokens === "object" ? refreshed.tokens : refreshed) as Partial<TokenData>;
+		if (typeof returnedTokens.access_token !== "string" || !returnedTokens.access_token) {
 			logRefresh(accountKey, "invalid_response");
 			return null;
 		}
 		return {
-			tokens: {
-				id_token: typeof refreshed.id_token === "string" ? refreshed.id_token : source.tokens.id_token,
-				access_token: refreshed.access_token,
-				refresh_token:
-					typeof refreshed.refresh_token === "string" && refreshed.refresh_token
-						? refreshed.refresh_token
-						: source.tokens.refresh_token,
-				account_id: source.tokens.account_id
+				tokens: {
+					id_token: typeof returnedTokens.id_token === "string" ? returnedTokens.id_token : source.tokens.id_token,
+					access_token: returnedTokens.access_token,
+					refresh_token:
+						typeof returnedTokens.refresh_token === "string" && returnedTokens.refresh_token
+							? returnedTokens.refresh_token
+							: source.tokens.refresh_token,
+					account_id:
+						typeof returnedTokens.account_id === "string" && returnedTokens.account_id
+							? returnedTokens.account_id
+							: source.tokens.account_id
 			},
 			lastRefresh: new Date(now).toISOString(),
 			expiresAt:
-				typeof refreshed.expires_in === "number" && refreshed.expires_in > 0
-					? new Date(now + refreshed.expires_in * 1000).toISOString()
-					: null
+					typeof refreshed.expires_in === "number" && refreshed.expires_in > 0
+						? new Date(now + refreshed.expires_in * 1000).toISOString()
+						: jwtExpiry({
+								access_token: returnedTokens.access_token,
+								id_token: returnedTokens.id_token,
+								refresh_token: returnedTokens.refresh_token,
+								account_id: returnedTokens.account_id
+						  })
 		};
 	} catch {
 		logRefresh(accountKey, "network");

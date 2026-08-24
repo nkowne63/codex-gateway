@@ -58,6 +58,8 @@ describe("upstream authentication", () => {
 		});
 
 		const call = fetchMock.mock.calls.find(([url]) => url === env.CHATGPT_RESPONSES_URL)!;
+		expect(new Headers(call[1]?.headers).get("ChatGPT-Account-ID")).toBe("kv-account");
+		expect(new Headers(call[1]?.headers).get("originator")).toBe("codex_cli_rs");
 		const serialized = JSON.parse(String(call[1]?.body));
 		expect(serialized).toMatchObject({
 			...requestBody,
@@ -97,6 +99,7 @@ describe("upstream authentication", () => {
 		const body = JSON.parse(String(call[1]?.body));
 		expect(body).toMatchObject({ input, tools, tool_choice: "required", prompt_cache_key: "cache-stable" });
 		expect(new Headers(call[1]?.headers).get("session_id")).toBe("cache-stable");
+		expect(new Headers(call[1]?.headers).get("originator")).toBe("codex_cli_rs");
 	});
 	it("refreshes a KV-only credential after a 401", async () => {
 		const env = {

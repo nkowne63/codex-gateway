@@ -15,6 +15,12 @@ export interface Env {
 	AUTH_REFRESH_COORDINATOR?: DurableObjectNamespace;
 	OAUTH_LOGIN_COORDINATOR?: DurableObjectNamespace;
 	GATEWAY_BEARER_TOKEN: string;
+	ACCESS_SERVICE_TOKEN_CLIENT_ID?: string;
+	ACCESS_SERVICE_TOKEN_CLIENT_SECRET?: string;
+	ACCESS_TEAM_DOMAIN?: string;
+	ACCESS_AUDIENCE?: string;
+	ACCESS_AUDIENCE_API?: string;
+	ACCESS_AUDIENCE_V1?: string;
 	OPENAI_API_KEY: string;
 	CHATGPT_LOCAL_CLIENT_ID: string;
 	CHATGPT_RESPONSES_URL: string;
@@ -107,6 +113,12 @@ export interface RefreshRequest {
 }
 
 export interface RefreshResponse {
+	tokens?: {
+		id_token?: string;
+		access_token?: string;
+		refresh_token?: string;
+		account_id?: string;
+	};
 	id_token?: string;
 	access_token?: string;
 	refresh_token?: string;

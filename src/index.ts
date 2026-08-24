@@ -5,10 +5,11 @@ import ollama from "./routes/ollama"; // Import the ollama router
 import responses from "./routes/responses";
 import { createOAuthLoginApp } from "./oauth_login";
 import { createOAuthLoginPage } from "./oauth_login_page";
+import type { Env } from "./types";
 export { AuthRefreshCoordinator } from "./auth_refresh_coordinator";
 export { OAuthLoginCoordinator } from "./oauth_login_coordinator";
 
-const app = new Hono();
+const app = new Hono<{ Bindings: Env }>();
 
 app.use(
 	"*",

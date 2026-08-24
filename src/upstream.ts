@@ -118,8 +118,9 @@ export async function startUpstreamRequest(
 	if (!isOllamaRequest) {
 		headers["Authorization"] = `Bearer ${accessToken}`;
 		headers["Accept"] = "text/event-stream";
-		headers["chatgpt-account-id"] = accountId;
+		headers["ChatGPT-Account-ID"] = accountId;
 		headers["OpenAI-Beta"] = "responses=experimental";
+		headers["originator"] = "codex_cli_rs";
 		if (sessionId) {
 			headers["session_id"] = sessionId;
 		}
@@ -151,8 +152,9 @@ export async function startUpstreamRequest(
 					if (!isOllamaRequest) {
 						headers["Authorization"] = `Bearer ${refreshedAuth.accessToken}`;
 						headers["Accept"] = "text/event-stream";
-						headers["chatgpt-account-id"] = refreshedAuth.accountId || accountId;
+						headers["ChatGPT-Account-ID"] = refreshedAuth.accountId || accountId;
 						headers["OpenAI-Beta"] = "responses=experimental";
+						headers["originator"] = "codex_cli_rs";
 						if (sessionId) {
 							headers["session_id"] = sessionId;
 						}

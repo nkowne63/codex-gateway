@@ -4,6 +4,10 @@ compatibility_date = "2024-09-23"
 
 compatibility_flags = ["nodejs_compat"]
 
+# Cloudflare Access JWT verification (set as Worker vars; no secrets in git).
+# ACCESS_TEAM_DOMAIN = "team.example.cloudflareaccess.com"
+# ACCESS_AUDIENCE = "..."
+
 # --- KV Namespaces ---
 kv_namespaces = [
   { binding = "KV", id = "b12d6bf32db5421abb0dbe86ca1b9b2e" }

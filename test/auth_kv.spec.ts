@@ -78,6 +78,43 @@ describe("Codex auth store", () => {
 		expect(kv.values.get("auth_last_refresh")).toBe("2026-08-19T03:04:05.000Z");
 	});
 
+	it("derives expiry from a nested auth token JWT when expires_at is absent", async () => {
+		const payload = btoa(JSON.stringify({ exp: Math.floor(Date.parse("2026-08-19T04:00:00.000Z") / 1000) }))
+			.replace(/=/g, "")
+			.replace(/\+/g, "-")
+			.replace(/\//g, "_");
+		const kv = createKv();
+		const env = createEnv(kv, {
+			tokens: { ...fallbackTokens, access_token: `header.${payload}.signature` },
+			last_refresh: new Date(0).toISOString()
+		});
+
+		await expect(AuthStore.getFresh(env, Date.parse("2026-08-19T03:00:00.000Z"))).resolves.toMatchObject({
+			expiresAt: "2026-08-19T04:00:00.000Z"
+		});
+	});
+
+	it("accepts nested tokens in refresh responses and persists account metadata", async () => {
+		const kv = createKv({ auth_tokens: JSON.stringify(fallbackTokens), auth_last_refresh: new Date(0).toISOString() });
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				new Response(JSON.stringify({ tokens: { access_token: "nested-access", refresh_token: "nested-refresh", account_id: "nested-account" }, expires_in: 3600 }))
+			)
+		);
+
+		await expect(AuthStore.refresh(createEnv(kv), Date.parse("2026-08-19T03:00:00.000Z"))).resolves.toMatchObject({
+			accessToken: "nested-access",
+			accountId: "nested-account",
+			tokens: { refresh_token: "nested-refresh" }
+		});
+		expect(JSON.parse(String(kv.values.get("auth_tokens")))).toMatchObject({
+			access_token: "nested-access",
+			refresh_token: "nested-refresh",
+			account_id: "nested-account"
+		});
+	});
+
 	it("prefers persisted KV credentials over the deployment fallback", async () => {
 		const kv = createKv({
 			auth_tokens: JSON.stringify({
