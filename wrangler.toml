@@ -40,3 +40,7 @@ port = 8787             # Port for local development server
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]
 enabled = true
+
+[[vpc_services]]
+binding = "CODEX_SHIM"
+service_id = "01a033a8-8e69-7d22-88ac-cd76a95c117d"

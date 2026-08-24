@@ -101,7 +101,8 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 			reasoning
 		),
 		promptCacheKey,
-		responsesPayload: payload
+		responsesPayload: payload,
+		rawResponsesBody: JSON.stringify(payload)
 	});
 	if (error) return responseError("Upstream request failed", error.status || 502);
 	if (!upstream) return responseError("Upstream request failed", 502);

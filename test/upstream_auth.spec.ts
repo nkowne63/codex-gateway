@@ -26,6 +26,24 @@ afterEach(() => {
 });
 
 describe("upstream authentication", () => {
+	it("uses the private CODEX_SHIM without OAuth credentials and preserves the request body", async () => {
+		const body = JSON.stringify({ model: "gpt-5.6-luna", input: "hello", stream: true });
+		const shimFetch = vi.fn(async (request: Request) => {
+			expect(request.url).toBe("http://codex-shim.internal/v1/responses");
+			expect((await request.json()).model).toBe("lfm25-2.6b-vllm-ctx32k");
+			expect(request.headers.get("X-Logical-Model")).toBe("gpt-5.6-luna");
+			expect(request.headers.get("Authorization")).toBeNull();
+			expect(request.headers.get("ChatGPT-Account-ID")).toBeNull();
+			return new Response("ok", { status: 200 });
+		});
+		const env = { CODEX_SHIM: { fetch: shimFetch } } as unknown as Env;
+
+		const result = await startUpstreamRequest(env, "gpt-5.6-luna", [], { rawResponsesBody: body });
+
+		expect(result.response?.status).toBe(200);
+		expect(shimFetch).toHaveBeenCalledOnce();
+	});
+
 	it("preserves supported Responses fields while overriding gateway-controlled fields", async () => {
 		const env = {
 			KV: createKv(),

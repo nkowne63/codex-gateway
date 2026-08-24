@@ -13,6 +13,8 @@ type ToolChoice = "auto" | "none" | "required" | { type: string; function: { nam
 
 type OllamaPayload = Record<string, unknown>;
 
+const CODEX_SHIM_MODEL = "lfm25-2.6b-vllm-ctx32k";
+
 function safeUpstreamLocation(requestUrl: string): string {
 	try {
 		const url = new URL(requestUrl);
@@ -40,9 +42,38 @@ export async function startUpstreamRequest(
 		ollamaPayload?: OllamaPayload; // Added for Ollama specific payloads
 		promptCacheKey?: string;
 		responsesPayload?: Record<string, unknown>;
+		rawResponsesBody?: string;
 	}
 ): Promise<{ response: Response | null; error: Response | null }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
+	const isOllamaRequest = Boolean(options?.ollamaPath);
+
+	// The VPC shim is an OpenAI-compatible private service. Keep this branch
+	// credential-free: OAuth and gateway credentials must never cross the VPC
+	// boundary, and the caller's Responses JSON must remain byte-for-byte intact.
+	if (!isOllamaRequest && env.CODEX_SHIM && options?.rawResponsesBody !== undefined) {
+		try {
+			const shimPayload = JSON.parse(options.rawResponsesBody) as Record<string, unknown>;
+			const logicalModel = typeof shimPayload.model === "string" ? shimPayload.model : model;
+			shimPayload.model = CODEX_SHIM_MODEL;
+			const upstreamResponse = await env.CODEX_SHIM.fetch(
+				new Request("http://codex-shim.internal/v1/responses", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Accept: "text/event-stream",
+						"X-Logical-Model": logicalModel
+					},
+					body: JSON.stringify(shimPayload)
+				})
+			);
+			return upstreamResponse.ok
+				? { response: upstreamResponse, error: null }
+				: { response: null, error: new Response(null, { status: upstreamResponse.status }) };
+		} catch {
+			return { response: null, error: new Response(null, { status: 502 }) };
+		}
+	}
 
 	const { accessToken, accountId } = await AuthStore.getFresh(env, Date.now());
 
@@ -67,7 +98,6 @@ export async function startUpstreamRequest(
 		include.push("reasoning.encrypted_content");
 	}
 
-	const isOllamaRequest = Boolean(options?.ollamaPath);
 	const requestUrl = isOllamaRequest
 		? `${env.OLLAMA_API_URL}${options?.ollamaPath}` // Assuming OLLAMA_API_URL is in Env
 		: env.CHATGPT_RESPONSES_URL;
@@ -81,6 +111,8 @@ export async function startUpstreamRequest(
 	const responsesPayload = options?.responsesPayload;
 	const requestBody = isOllamaRequest
 		? JSON.stringify(options?.ollamaPayload)
+		: options?.rawResponsesBody !== undefined
+			? options.rawResponsesBody
 		: responsesPayload
 			? JSON.stringify({
 					...structuredClone(responsesPayload),

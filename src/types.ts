@@ -11,6 +11,7 @@ export type ToolChoiceType = "auto" | "none" | "required" | { type: "function"; 
 export type InputItemType = "message" | "function_call" | "function_call_output";
 
 export interface Env {
+	CODEX_SHIM?: Fetcher;
 	KV?: KVNamespace; // Optional KV namespace for token storage
 	AUTH_REFRESH_COORDINATOR?: DurableObjectNamespace;
 	OAUTH_LOGIN_COORDINATOR?: DurableObjectNamespace;
