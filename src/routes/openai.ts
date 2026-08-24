@@ -6,7 +6,7 @@ import { buildReasoningParam, applyReasoningToMessage } from "../reasoning";
 import { sseTranslateChat, sseTranslateText } from "../sse";
 import { getInstructionsForModel } from "../instructions";
 import { openaiAuthMiddleware } from "../middleware/openaiAuthMiddleware";
-import { MODEL_PRESETS, getReasoningEffortForModel, isModelPreset } from "../models";
+import { MODEL_IDS, MODEL_PRESETS, getReasoningEffortForModel, isModelPreset } from "../models";
 import { resolvePromptCacheKey } from "../conversation";
 
 const openai = new Hono<{ Bindings: Env }>();
@@ -394,7 +394,7 @@ openai.get("/v1/models", openaiAuthMiddleware(), (c) => {
 	const models = {
 		object: "list",
 		data: [
-			{ id: "gpt-5", object: "model", owned_by: "owner" },
+			...MODEL_IDS.map((id) => ({ id, object: "model", owned_by: "owner" })),
 			...MODEL_PRESETS.map((preset) => ({
 				id: preset.id,
 				object: "model",

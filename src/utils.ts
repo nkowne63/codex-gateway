@@ -20,6 +20,8 @@ export function normalizeModelName(name: string | null | undefined, debugModel: 
 		gpt5: "gpt-5",
 		"gpt-5-latest": "gpt-5",
 		"gpt-5": "gpt-5",
+		"gpt-5.6": "gpt-5.6-sol",
+		"homelab-codex": "gpt-5.6-luna",
 		codex: "codex-mini-latest",
 		"codex-mini": "codex-mini-latest",
 		"codex-mini-latest": "codex-mini-latest"
