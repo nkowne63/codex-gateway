@@ -2,20 +2,20 @@
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/mrproper)
 
-Transform OpenAI's Codex models into OpenAI-compatible endpoints using Cloudflare Workers. Access advanced reasoning capabilities and seamless API compatibility, powered by OAuth2 authentication and the same infrastructure that drives the official OpenAI Codex CLI.
+Transform OpenAI Responses API requests into an Access-protected Cloudflare Worker endpoint. Production inference uses the OpenAI hosted Responses API with a server-side `OPENAI_API_KEY`.
 
 ## ✨ Features
 
-- 🔐 **OAuth2 Authentication** - Uses your OpenAI account credentials via Codex CLI
+- 🔐 **Server-side API authentication** - Client gateway auth and the upstream OpenAI API key are separate credentials
 - 🎯 **OpenAI-Compatible API** - Drop-in replacement for OpenAI endpoints
 - 📚 **OpenAI SDK Support** - Works with official OpenAI SDKs and libraries
 - 🧠 **Advanced Reasoning** - Configurable reasoning effort with `think-tags` compatibility
 - 🛡️ **API Key Security** - Optional authentication layer for endpoint access
 - 🌐 **Third-party Integration** - Compatible with Open WebUI, Cline, and more
 - ⚡ **Cloudflare Workers** - Global edge deployment with low latency
-- 🔄 **Smart Token Management** - Automatic token refresh with KV storage
+- 🔄 **Server-side key management** - The upstream API key is stored as a Worker secret; no production token refresh is performed
 - 📡 **Real-time Streaming** - Server-sent events for live responses
-- 🚫 **Local backends disabled** - Ollama and other local inference paths fail closed; inference uses the hosted Codex Responses endpoint
+- 🚫 **Legacy backends disabled** - OAuth, Ollama, WSL, and shim paths are not fallback providers for production inference
 - 🎛️ **Flexible Tool Support** - OpenAI-compatible function calling
 
 ## 🚀 Quick Start
@@ -137,15 +137,12 @@ kv_namespaces = [
 
 Create a `.dev.vars` file:
 ```bash
-# Required: API key for client authentication
+# Required: server-side OpenAI API key (never expose to clients)
 OPENAI_API_KEY=sk-your-secret-api-key-here
+OPENAI_PROVIDER=openai-api
+OPENAI_DEFAULT_MODEL=gpt-5.6
 
-# Required: Codex CLI authentication JSON
-OPENAI_CODEX_AUTH={"tokens":{"id_token":"eyJ...","access_token":"sk-proj-...","refresh_token":"rft_...","account_id":"user-..."},"last_refresh":"2024-01-15T10:30:00.000Z","expires_at":"2024-01-15T11:30:00.000Z"}
-
-# Required: ChatGPT API configuration
-CHATGPT_LOCAL_CLIENT_ID=your_client_id_here
-CHATGPT_RESPONSES_URL=https://chatgpt.com/backend-api/codex/responses
+# Historical OAuth login variables are deprecated and not used by the API provider.
 
 # Optional: Reasoning configuration
 REASONING_EFFORT=medium
@@ -160,9 +157,6 @@ DEBUG_MODEL=
 For production, set the secrets:
 ```bash
 wrangler secret put OPENAI_API_KEY
-wrangler secret put OPENAI_CODEX_AUTH
-wrangler secret put CHATGPT_LOCAL_CLIENT_ID
-wrangler secret put CHATGPT_RESPONSES_URL
 ```
 
 ### Step 4: Deploy
@@ -220,10 +214,9 @@ The service will be available at `http://localhost:8787`
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENAI_API_KEY` | ✅ | API key for client authentication |
-| `OPENAI_CODEX_AUTH` | ✅ | OAuth2 credentials JSON from Codex CLI |
-| `CHATGPT_LOCAL_CLIENT_ID` | ✅ | ChatGPT client ID |
-| `CHATGPT_RESPONSES_URL` | ✅ | ChatGPT API endpoint URL |
+| `OPENAI_PROVIDER` | ✅ | Must be `openai-api` |
+| `OPENAI_API_KEY` | ✅ | Server-side OpenAI API key |
+| `OPENAI_DEFAULT_MODEL` | ✅ | Default hosted model, normally `gpt-5.6` |
 
 #### Reasoning & Intelligence
 

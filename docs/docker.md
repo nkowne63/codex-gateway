@@ -37,10 +37,8 @@ Edit [`.dev.vars`](./.dev.vars) with your configuration:
 ```bash
 # OpenAI API Configuration
 OPENAI_API_KEY=your_api_key_here
-CHATGPT_RESPONSES_URL=https://api.openai.com/v1/chat/completions
-
-# Authentication
-OPENAI_CODEX_AUTH={"tokens":{"access_token":"your_token","account_id":"your_account"}}
+OPENAI_PROVIDER=openai-api
+OPENAI_DEFAULT_MODEL=gpt-5.6
 
 # Optional: Reasoning Configuration
 REASONING_EFFORT=medium
@@ -81,9 +79,9 @@ The service will be available at `http://localhost:8787`
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `OPENAI_API_KEY` | Your OpenAI API key for authentication | ✅ | - |
-| `CHATGPT_RESPONSES_URL` | OpenAI API endpoint URL | ✅ | - |
-| `OPENAI_CODEX_AUTH` | JSON string with access tokens | ✅ | - |
+| `OPENAI_PROVIDER` | Production provider; must be `openai-api` | ✅ | `openai-api` |
+| `OPENAI_API_KEY` | Server-side OpenAI API key secret | ✅ | - |
+| `OPENAI_DEFAULT_MODEL` | Default hosted model | ✅ | `gpt-5.6` |
 | `REASONING_EFFORT` | AI reasoning depth: `minimal`, `low`, `medium`, `high` | ❌ | `minimal` |
 | `REASONING_SUMMARY` | Summary mode: `auto`, `on`, `off` | ❌ | `auto` |
 | `REASONING_COMPAT` | Compatibility mode: `think-tags`, `standard` | ❌ | `think-tags` |
@@ -159,8 +157,8 @@ Create `.env.production`:
 ```bash
 NODE_ENV=production
 OPENAI_API_KEY=your_production_key
-CHATGPT_RESPONSES_URL=https://api.openai.com/v1/chat/completions
-OPENAI_CODEX_AUTH={"tokens":{"access_token":"prod_token","account_id":"prod_account"}}
+OPENAI_PROVIDER=openai-api
+OPENAI_DEFAULT_MODEL=gpt-5.6
 REASONING_EFFORT=medium
 VERBOSE=false
 ```

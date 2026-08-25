@@ -1,5 +1,4 @@
 import { normalizeModelName } from "./utils";
-import { AuthStore } from "./auth_store";
 import { getInstructionsForModel } from "./instructions";
 import { stablePromptCacheKey } from "./cache_key";
 import { Env, InputItem, Tool } from "./types"; // Import types
@@ -40,22 +39,14 @@ export async function startUpstreamRequest(
 	}
 ): Promise<{ response: Response | null; error: Response | null }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
-	const { accessToken, accountId } = await AuthStore.getFresh(env, Date.now());
-
-	// KV token check (minimal logging)
-
-	if (!accessToken || !accountId) {
+	if (env.OPENAI_PROVIDER !== "openai-api") {
 		return {
 			response: null,
-			error: new Response(
-				JSON.stringify({
-					error: {
-						message: "Missing ChatGPT credentials. Run 'codex login' first"
-					}
-				}),
-				{ status: 401, headers: { "Content-Type": "application/json" } }
-			)
+			error: new Response(JSON.stringify({ error: { message: "OpenAI API provider is not enabled" } }), { status: 503, headers: { "Content-Type": "application/json" } })
 		};
+	}
+	if (!env.OPENAI_API_KEY) {
+		return { response: null, error: new Response(JSON.stringify({ error: { message: "OpenAI API provider is not configured" } }), { status: 503, headers: { "Content-Type": "application/json" } }) };
 	}
 
 	const include: string[] = [];
@@ -63,7 +54,7 @@ export async function startUpstreamRequest(
 		include.push("reasoning.encrypted_content");
 	}
 
-	const requestUrl = env.CHATGPT_RESPONSES_URL;
+	const requestUrl = "https://api.openai.com/v1/responses";
 
 	const sessionId = options?.promptCacheKey || (await stablePromptCacheKey(crypto.randomUUID(), instructions || model));
 
@@ -107,13 +98,11 @@ export async function startUpstreamRequest(
 		"Content-Type": "application/json"
 	};
 
-	headers["Authorization"] = `Bearer ${accessToken}`;
-	headers["Accept"] = "text/event-stream";
-	headers["ChatGPT-Account-ID"] = accountId;
-	headers["OpenAI-Beta"] = "responses=experimental";
-	headers["originator"] = "codex_cli_rs";
-	if (sessionId) {
-		headers["session_id"] = sessionId;
+	headers["Authorization"] = `Bearer ${env.OPENAI_API_KEY}`;
+	try {
+		headers["Accept"] = JSON.parse(requestBody).stream === true ? "text/event-stream" : "application/json";
+	} catch {
+		headers["Accept"] = "application/json";
 	}
 
 	try {
@@ -130,35 +119,6 @@ export async function startUpstreamRequest(
 		if (!upstreamResponse.ok) {
 			// Handle HTTP errors from upstream
 			logUpstreamError(upstreamResponse.status, requestUrl, "kind=http method=POST");
-
-			// Check if it's a 401 Unauthorized and we can refresh the token
-			if (upstreamResponse.status === 401) {
-				const refreshedAuth = await AuthStore.refresh(env, Date.now());
-				if (refreshedAuth.accessToken) {
-					const headers: HeadersInit = {
-						"Content-Type": "application/json"
-					};
-
-					headers["Authorization"] = `Bearer ${refreshedAuth.accessToken}`;
-					headers["Accept"] = "text/event-stream";
-					headers["ChatGPT-Account-ID"] = refreshedAuth.accountId || accountId;
-					headers["OpenAI-Beta"] = "responses=experimental";
-					headers["originator"] = "codex_cli_rs";
-					if (sessionId) {
-						headers["session_id"] = sessionId;
-					}
-
-					const retryResponse = await fetch(requestUrl, {
-						method: "POST",
-						headers: headers,
-						body: requestBody
-					});
-
-					if (retryResponse.ok) {
-						return { response: retryResponse, error: null };
-					}
-				}
-			}
 
 			return {
 				response: null,

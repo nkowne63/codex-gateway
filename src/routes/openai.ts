@@ -41,7 +41,7 @@ openai.post("/v1/chat/completions", openaiAuthMiddleware(), async (c) => {
 	}
 
 	const modelInput = payload.model as string;
-	const model = normalizeModelName(modelInput, debugModel);
+	const model = normalizeModelName(modelInput, debugModel, c.env.OPENAI_DEFAULT_MODEL);
 	// Use reasoning effort from preset if model input is a preset ID
 	if (isModelPreset(modelInput)) {
 		const presetEffort = getReasoningEffortForModel(
@@ -267,7 +267,7 @@ openai.post("/v1/completions", openaiAuthMiddleware(), async (c) => {
 		return c.json({ error: { message: "Invalid JSON body" } }, 400);
 	}
 
-	const model = normalizeModelName(payload.model as string, debugModel);
+	const model = normalizeModelName(payload.model as string | undefined, debugModel, c.env.OPENAI_DEFAULT_MODEL);
 	let prompt = payload.prompt;
 	if (Array.isArray(prompt)) {
 		prompt = prompt.join("");

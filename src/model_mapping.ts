@@ -19,5 +19,5 @@ function configuredModelMap(value: string | undefined): Record<string, string> {
 export function mapModelId(osModelId: string | undefined, env: Env): string {
 	const requested = typeof osModelId === "string" ? osModelId.trim() : "";
 	const mapped = configuredModelMap(env.MODEL_ID_MAP)[requested];
-	return mapped ? mapped.trim() : normalizeModelName(requested, env.DEBUG_MODEL);
+	return mapped ? mapped.trim() : normalizeModelName(requested, env.DEBUG_MODEL, env.OPENAI_DEFAULT_MODEL);
 }

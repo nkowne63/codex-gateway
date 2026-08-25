@@ -21,8 +21,8 @@ export interface Env {
 	ACCESS_AUDIENCE?: string;
 	ACCESS_AUDIENCE_API?: string;
 	ACCESS_AUDIENCE_V1?: string;
-	CHATGPT_LOCAL_CLIENT_ID: string;
-	CHATGPT_RESPONSES_URL: string;
+	CHATGPT_LOCAL_CLIENT_ID?: string;
+	CHATGPT_RESPONSES_URL?: string;
 	OPENAI_CODEX_AUTH?: string;
 	DEBUG_MODEL?: string;
 	REASONING_EFFORT?: ReasoningEffort;
@@ -30,6 +30,9 @@ export interface Env {
 	REASONING_COMPAT?: ReasoningCompat;
 	VERBOSE?: VerboseMode;
 	MODEL_ID_MAP?: string;
+	OPENAI_PROVIDER?: "openai-api";
+	OPENAI_API_KEY?: string;
+	OPENAI_DEFAULT_MODEL?: string;
 }
 
 export type AuthTokens = {

@@ -1,6 +1,6 @@
 # Gateway Authentication
 
-The proxy authenticates clients with a dedicated gateway bearer token. The upstream OAuth credentials are separate and are never accepted as the client credential.
+The proxy authenticates clients with a dedicated gateway bearer token. Production inference uses the separate server-side `OPENAI_API_KEY`; it is never accepted as the client credential or returned to clients. The historical Codex OAuth login code remains only for explicit deprecated compatibility flows and is unreachable from the `openai-api` provider.
 
 ## Overview
 
@@ -121,4 +121,4 @@ The following endpoints do **NOT** require authentication:
 - `GET /` - Root endpoint with service information
 - `GET /health` - Health check endpoint
 
-All other endpoints require `GATEWAY_BEARER_TOKEN`. The browser UI is available at `/oauth/login`. Use `GET /oauth/login/url` to create a PKCE authorization URL and paste the resulting callback URL into the UI; `POST /oauth/callback` exchanges it. The gateway token is supplied only in the request header and is never placed in URLs, HTML, KV, or logs.
+All other endpoints require `GATEWAY_BEARER_TOKEN`. The historical OAuth login UI is retained for compatibility only and is disabled with `410` when the production `openai-api` provider is active. Production inference uses the server-side OpenAI API key and does not refresh OAuth tokens.

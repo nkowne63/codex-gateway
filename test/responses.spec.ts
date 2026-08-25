@@ -13,6 +13,7 @@ const env = {
 	CHATGPT_LOCAL_CLIENT_ID: "client-id",
 	CHATGPT_RESPONSES_URL: "https://example.test/responses",
 	MODEL_ID_MAP: '{"homelab-codex":"gpt-5-codex"}'
+	,OPENAI_PROVIDER: "openai-api"
 } as Env;
 
 describe("Responses endpoint", () => {
@@ -21,7 +22,8 @@ describe("Responses endpoint", () => {
 			response: new Response(
 				'data: {"type":"response.created","response":{"id":"resp_123"}}\n\n' +
 					'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n' +
-					'data: {"type":"response.completed","response":{"id":"resp_123","object":"response","status":"completed","model":"gpt-5-codex","output":[],"output_text":"Hello"}}\n\n'
+				'data: {"type":"response.completed","response":{"id":"resp_123","object":"response","status":"completed","model":"gpt-5-codex","output":[],"output_text":"Hello"}}\n\n',
+				{ headers: { "Content-Type": "text/event-stream" } }
 			),
 			error: null
 		});
@@ -42,13 +44,14 @@ describe("Responses endpoint", () => {
 				{ type: "function_call_output", call_id: "call_1", output: "record found" }
 			],
 			tools: [{ type: "function", name: "lookup", description: "find a record", parameters: { type: "object" } }]
+			,stream: false
 		};
 
 		const response = await responses.fetch(
 			new Request("https://gateway.test/v1/responses", {
 				method: "POST",
 				headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
-				body: JSON.stringify(payload)
+				body: JSON.stringify({ ...payload, stream: false })
 			}),
 			env
 		);
@@ -66,6 +69,21 @@ describe("Responses endpoint", () => {
 			payload.input,
 			expect.objectContaining({ tools: payload.tools, toolChoice: undefined, promptCacheKey: "cache-42" })
 		);
+	});
+
+	it("returns normal non-stream Responses JSON without SSE parsing", async () => {
+		startUpstreamRequest.mockResolvedValueOnce({ response: new Response(JSON.stringify({ id: "resp_json", object: "response", status: "completed", model: "gpt-5.6", output: [{ type: "message" }] }), { headers: { "Content-Type": "application/json" } }), error: null });
+		const response = await responses.fetch(new Request("https://gateway.test/v1/responses", { method: "POST", headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" }, body: JSON.stringify({ model: "gpt-5.6", input: "hello", stream: false }) }), env);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({ id: "resp_json", object: "response", model: "gpt-5.6", output: [{ type: "message" }] });
+	});
+
+	it("treats omitted stream as non-stream Responses JSON", async () => {
+		startUpstreamRequest.mockResolvedValueOnce({ response: new Response(JSON.stringify({ id: "resp_omitted", object: "response", status: "completed" }), { headers: { "Content-Type": "application/json" } }), error: null });
+		const response = await responses.fetch(new Request("https://gateway.test/v1/responses", { method: "POST", headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" }, body: JSON.stringify({ model: "gpt-5.6", input: "hello" }) }), env);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("Content-Type")).toContain("application/json");
+		expect(await response.json()).toMatchObject({ id: "resp_omitted" });
 	});
 
 	it("passes the complete parsed request body to upstream construction", async () => {
@@ -145,6 +163,13 @@ describe("Responses endpoint", () => {
 		expect(keys[0]).not.toBe(keys[1]);
 	});
 
+	it("uses OPENAI_DEFAULT_MODEL when model is omitted", async () => {
+		startUpstreamRequest.mockResolvedValueOnce({ response: new Response(JSON.stringify({ id: "resp", object: "response", status: "completed", model: "gpt-5.6-sol" }), { headers: { "Content-Type": "application/json" } }), error: null });
+		const configured = { ...env, OPENAI_DEFAULT_MODEL: "gpt-5.6-sol" } as Env;
+		await responses.fetch(new Request("https://gateway.test/v1/responses", { method: "POST", headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" }, body: JSON.stringify({ input: "hello", stream: false }) }), configured);
+		expect(startUpstreamRequest).toHaveBeenLastCalledWith(configured, "gpt-5.6-sol", expect.any(Array), expect.any(Object));
+	});
+
 	it.each(["incomplete", "cancelled", "failed"])("preserves an authoritative %s terminal response", async (status) => {
 		const terminal = {
 			id: "resp_terminal",
@@ -158,14 +183,14 @@ describe("Responses endpoint", () => {
 			error: { message: "Bearer oauth-secret", code: "token-secret" }
 		};
 		startUpstreamRequest.mockResolvedValueOnce({
-			response: new Response(`data: ${JSON.stringify({ type: `response.${status}`, response: terminal })}`),
+			response: new Response(`data: ${JSON.stringify({ type: `response.${status}`, response: terminal })}`, { headers: { "Content-Type": "text/event-stream" } }),
 			error: null
 		});
 		const response = await responses.fetch(
 			new Request("https://gateway.test/v1/responses", {
 				method: "POST",
 				headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
-				body: JSON.stringify({ input: "hello" })
+				body: JSON.stringify({ input: "hello", stream: false })
 			}),
 			env
 		);

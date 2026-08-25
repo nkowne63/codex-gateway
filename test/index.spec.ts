@@ -28,21 +28,24 @@ describe("OAuth integration routes", () => {
 		KV: undefined,
 		GATEWAY_BEARER_TOKEN: "gateway-secret",
 		OPENAI_API_KEY: "client-secret",
+		OPENAI_PROVIDER: "openai-api",
 		CHATGPT_LOCAL_CLIENT_ID: "client-id",
 		CHATGPT_RESPONSES_URL: "unused"
 	} as typeof env;
 
 	it("mounts the login UI without embedding a gateway secret", async () => {
 		const response = await worker.fetch(new Request("https://example.com/oauth/login"), bindings, createExecutionContext());
-		expect(response.status).toBe(200);
-		const html = await response.text();
-		expect(html).toContain("OAuth login");
-		expect(html).not.toContain("gateway-secret");
+		expect(response.status).toBe(410);
+	});
+
+	it("disables OAuth routes for the production API provider", async () => {
+		const response = await worker.fetch(new Request("https://example.com/oauth/login"), { ...bindings, OPENAI_PROVIDER: "openai-api" }, createExecutionContext());
+		expect(response.status).toBe(410);
 	});
 
 	it("requires the gateway token for the login URL endpoint", async () => {
 		const response = await worker.fetch(new Request("https://example.com/oauth/login/url"), bindings, createExecutionContext());
-		expect(response.status).toBe(401);
+		expect(response.status).toBe(410);
 	});
 
 	it("uses the gateway token for API authentication, not the OAuth client secret", async () => {

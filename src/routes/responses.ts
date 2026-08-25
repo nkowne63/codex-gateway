@@ -17,7 +17,21 @@ function responseError(message: string, status: number) {
 	});
 }
 
-async function responseJson(upstream: Response, model: string): Promise<Response> {
+
+async function responseJson(upstream: Response, model: string, upstreamIsSse: boolean): Promise<Response> {
+	const contentType = upstream.headers.get("content-type") || "";
+	if (!upstreamIsSse && !contentType.includes("text/event-stream")) {
+		try {
+			const body = (await upstream.json()) as Record<string, unknown>;
+			const safeBody = sanitizeTerminalResponse(body);
+			return new Response(JSON.stringify({ ...safeBody, model: safeBody.model || model }), {
+				status: upstream.status,
+				headers: { "Content-Type": "application/json" }
+			});
+		} catch {
+			return responseError("Upstream request failed", 502);
+		}
+	}
 	const reader = upstream.body?.getReader();
 	if (!reader) return responseError("Upstream request failed", 502);
 
@@ -118,7 +132,8 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 			}
 		});
 	}
-	return responseJson(upstream, model);
+	// Responses API defaults to a normal JSON response when stream is omitted.
+	return responseJson(upstream, model, false);
 });
 
 export default responses;

@@ -2,216 +2,65 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { startUpstreamRequest } from "../src/upstream";
 import type { Env } from "../src/types";
 
-function createKv() {
-	const values = new Map<string, string>([
-		[
-			"auth_tokens",
-			JSON.stringify({ access_token: "stale-token", refresh_token: "kv-refresh-token", account_id: "kv-account" })
-		],
-		["auth_last_refresh", new Date().toISOString()]
-	]);
-	return {
-		get: vi.fn(async (key: string, type?: "json") => {
-			const value = values.get(key) ?? null;
-			return type === "json" && value ? JSON.parse(value) : value;
-		}),
-		put: vi.fn(async (key: string, value: string) => values.set(key, value)),
-		delete: vi.fn(async (key: string) => values.delete(key))
-	};
-}
+const env = (extra: Partial<Env> = {}) => ({
+	OPENAI_PROVIDER: "openai-api",
+	OPENAI_API_KEY: "test-api-key",
+	...extra
+}) as Env;
 
-afterEach(() => {
-	vi.unstubAllGlobals();
-	vi.restoreAllMocks();
-});
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-describe("upstream authentication", () => {
-	it("uses hosted OAuth even when a legacy shim binding is present", async () => {
-		const env = {
-			KV: createKv(),
-			CHATGPT_LOCAL_CLIENT_ID: "client-id",
-			CHATGPT_RESPONSES_URL: "https://chatgpt.test/responses",
-			CODEX_SHIM: { fetch: vi.fn() }
-		} as unknown as Env;
-		const fetchMock = vi.fn(async (url: string) =>
-			url === env.CHATGPT_RESPONSES_URL ? new Response("ok") : new Response("instructions")
-		);
-		vi.stubGlobal("fetch", fetchMock);
+describe("OpenAI API upstream provider", () => {
+	it("fails closed with 503 when the provider key is missing", async () => {
+		const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+		const result = await startUpstreamRequest(env({ OPENAI_API_KEY: undefined }), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello" }) });
+		expect(result.response).toBeNull(); expect(result.error?.status).toBe(503);
+		expect(await result.error?.text()).not.toContain("test-api-key"); expect(fetchMock).not.toHaveBeenCalled();
+	});
 
-		const result = await startUpstreamRequest(env, "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello" }) });
-
+	it("sends the public model and Responses body with only API authentication", async () => {
+		const upstream = vi.fn(async () => new Response("ok", { status: 200 })); vi.stubGlobal("fetch", upstream);
+		const body = { model: "gpt-5.6", input: [{ type: "message", role: "user", content: "hello" }], tools: [{ type: "function", name: "lookup" }], instructions: "be precise", stream: true };
+		const result = await startUpstreamRequest(env(), "gpt-5.6", [], { rawResponsesBody: JSON.stringify(body) });
 		expect(result.response?.status).toBe(200);
-		expect(env.CODEX_SHIM.fetch).not.toHaveBeenCalled();
-		expect(fetchMock.mock.calls.some(([url]) => url === env.CHATGPT_RESPONSES_URL)).toBe(true);
+		const [url, init] = upstream.mock.calls.find(([candidate]) => candidate === "https://api.openai.com/v1/responses")!; const headers = new Headers(init?.headers);
+		expect(url).toBe("https://api.openai.com/v1/responses"); expect(headers.get("Authorization")).toBe("Bearer test-api-key");
+		expect(headers.get("ChatGPT-Account-ID")).toBeNull(); expect(headers.get("originator")).toBeNull(); expect(headers.get("OpenAI-Beta")).toBeNull();
+		expect(JSON.parse(String(init?.body))).toEqual(body);
 	});
 
-	it("preserves supported Responses fields while overriding gateway-controlled fields", async () => {
-		const env = {
-			KV: createKv(),
-			CHATGPT_LOCAL_CLIENT_ID: "client-id",
-			CHATGPT_RESPONSES_URL: "https://chatgpt.test/responses"
-		} as Env;
-		const fetchMock = vi.fn(async (url: string) =>
-			url === env.CHATGPT_RESPONSES_URL ? new Response("ok") : new Response("instructions")
-		);
-		vi.stubGlobal("fetch", fetchMock);
-		const requestBody = {
-			model: "client-model",
-			instructions: "unsafe fallback",
-			input: "hello",
-			previous_response_id: "resp_previous",
-			metadata: { trace: "safe", nested: { value: 7 } },
-			max_output_tokens: 321,
-			truncation: "auto",
-			include: ["web_search_call.action.sources"],
-			store: true,
-			service_tier: "priority",
-			stream: false,
-			prompt_cache_key: "client-cache-key"
-		};
-
-		await startUpstreamRequest(env, "gpt-5", [], {
-			instructions: "safe gateway instructions",
-			promptCacheKey: "stable-gateway-key",
-			responsesPayload: requestBody
-		});
-
-		const call = fetchMock.mock.calls.find(([url]) => url === env.CHATGPT_RESPONSES_URL)!;
-		expect(new Headers(call[1]?.headers).get("ChatGPT-Account-ID")).toBe("kv-account");
-		expect(new Headers(call[1]?.headers).get("originator")).toBe("codex_cli_rs");
-		const serialized = JSON.parse(String(call[1]?.body));
-		expect(serialized).toMatchObject({
-			...requestBody,
-			model: "gpt-5",
-			instructions: "safe gateway instructions",
-			stream: true,
-			prompt_cache_key: "stable-gateway-key"
-		});
-		expect(requestBody).toMatchObject({
-			model: "client-model",
-			instructions: "unsafe fallback",
-			stream: false,
-			prompt_cache_key: "client-cache-key"
-		});
+	it("always uses the fixed OpenAI Responses endpoint", async () => {
+		const fetchMock = vi.fn(async () => new Response("ok", { status: 200 })); vi.stubGlobal("fetch", fetchMock);
+		await startUpstreamRequest(env({ OPENAI_API_URL: "https://attacker.example/steal" } as Partial<Env>), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello", stream: false }) });
+		const apiCall = fetchMock.mock.calls.find(([url]) => url === "https://api.openai.com/v1/responses");
+		expect(apiCall?.[0]).toBe("https://api.openai.com/v1/responses");
+		expect(new Headers(apiCall?.[1]?.headers).get("Accept")).toBe("application/json");
 	});
 
-	it("serializes required tool choice, images, and the supplied cache key", async () => {
-		const env = {
-			KV: createKv(),
-			CHATGPT_LOCAL_CLIENT_ID: "client-id",
-			CHATGPT_RESPONSES_URL: "https://chatgpt.test/responses"
-		} as Env;
-		const fetchMock = vi.fn(async (url: string) =>
-			url === env.CHATGPT_RESPONSES_URL ? new Response("ok") : new Response("instructions")
-		);
-		vi.stubGlobal("fetch", fetchMock);
-		const input = [
-			{ type: "message", role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,abc" }] }
-		] as any;
-		const tools = [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }] as any;
-		await startUpstreamRequest(env, "gpt-5", input, {
-			tools,
-			toolChoice: "required" as any,
-			promptCacheKey: "cache-stable"
-		});
-		const call = fetchMock.mock.calls.find(([url]) => url === env.CHATGPT_RESPONSES_URL)!;
-		const body = JSON.parse(String(call[1]?.body));
-		expect(body).toMatchObject({ input, tools, tool_choice: "required", prompt_cache_key: "cache-stable" });
-		expect(new Headers(call[1]?.headers).get("session_id")).toBe("cache-stable");
-		expect(new Headers(call[1]?.headers).get("originator")).toBe("codex_cli_rs");
-	});
-	it("refreshes a KV-only credential after a 401", async () => {
-		const env = {
-			KV: createKv(),
-			OPENAI_API_KEY: "client-key",
-			CHATGPT_LOCAL_CLIENT_ID: "client-id",
-			CHATGPT_RESPONSES_URL: "https://chatgpt.com/backend-api/codex/responses"
-		} as Env;
-		let upstreamCalls = 0;
-		const fetchMock = vi.fn(async (url: string) => {
-			if (url === "https://auth.openai.com/oauth/token")
-				return new Response(JSON.stringify({ access_token: "fresh-token" }));
-			if (url === env.CHATGPT_RESPONSES_URL) {
-				upstreamCalls += 1;
-				return upstreamCalls === 1
-					? new Response(JSON.stringify({ error: { message: "unauthorized" } }), { status: 401 })
-					: new Response("ok", { status: 200 });
-			}
-			return new Response("instructions");
-		});
-		vi.stubGlobal("fetch", fetchMock);
-		vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-		const result = await startUpstreamRequest(env, "gpt-5", []);
-
-		expect(result.response?.status).toBe(200);
-		expect(upstreamCalls).toBe(2);
-		const retry = fetchMock.mock.calls.filter(([url]) => url === env.CHATGPT_RESPONSES_URL)[1];
-		expect(new Headers(retry[1]?.headers).get("Authorization")).toBe("Bearer fresh-token");
+	it.each([401, 403])("returns a safe error without OAuth refresh for upstream %s", async (status) => {
+		const fetchMock = vi.fn(async () => new Response("secret upstream detail", { status })); vi.stubGlobal("fetch", fetchMock);
+		const result = await startUpstreamRequest(env({ OPENAI_CODEX_AUTH: "oauth-secret" }), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello" }) });
+		expect(result.error?.status).toBe(status); expect(await result.error?.text()).toBe(JSON.stringify({ error: { message: "Upstream request failed" } })); expect(fetchMock.mock.calls.filter(([url]) => url === "https://api.openai.com/v1/responses")).toHaveLength(1);
 	});
 
-	it("redacts token-bearing values from HTTP and thrown upstream errors", async () => {
-		const env = {
-			KV: createKv(),
-			OPENAI_API_KEY: "client-key",
-			CHATGPT_LOCAL_CLIENT_ID: "client-id",
-			CHATGPT_RESPONSES_URL: "https://chatgpt.com/backend-api/codex/responses?secret=query-token"
-		} as Env;
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(
-				async () =>
-					new Response(JSON.stringify({ error: { message: "Bearer response-token" } }), {
-						status: 500,
-						headers: { Authorization: "Bearer response-header-token", "x-safe": "metadata" }
-					})
-			)
-		);
-
-		const result = await startUpstreamRequest(env, "gpt-5", [{ type: "message", role: "user", content: "body-token" }]);
-		const logged = errorSpy.mock.calls.flat().join(" ");
-		const response = await result.error!.text();
-
-		expect(logged).toContain("status=500");
-		expect(logged).toContain("url=chatgpt.com/backend-api/codex/responses");
-		for (const secret of [
-			"stale-token",
-			"kv-account",
-			"response-token",
-			"response-header-token",
-			"query-token",
-			"body-token"
-		]) {
-			expect(logged).not.toContain(secret);
-			expect(response).not.toContain(secret);
-		}
-		expect(response).toContain("Upstream request failed");
+	it("preserves non-stream Responses requests and generated stream requests", async () => {
+		const fetchMock = vi.fn(async () => new Response("ok", { status: 200 })); vi.stubGlobal("fetch", fetchMock);
+		await startUpstreamRequest(env(), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello", stream: false }) });
+		const apiCalls = fetchMock.mock.calls.filter(([url]) => url === "https://api.openai.com/v1/responses");
+		expect(JSON.parse(String(apiCalls[0][1]?.body)).stream).toBe(false);
+		await startUpstreamRequest(env(), "gpt-5.6", [{ type: "message", role: "user", content: "hello" }]);
+		const allApiCalls = fetchMock.mock.calls.filter(([url]) => url === "https://api.openai.com/v1/responses");
+		expect(JSON.parse(String(allApiCalls[1][1]?.body))).toMatchObject({ model: "gpt-5.6", stream: true });
 	});
 
-	it("redacts an access token from thrown-fetch responses and logs", async () => {
-		const env = {
-			KV: createKv(),
-			OPENAI_API_KEY: "client-key",
-			CHATGPT_LOCAL_CLIENT_ID: "client-id",
-			CHATGPT_RESPONSES_URL: "https://chatgpt.com/backend-api/codex/responses"
-		} as Env;
-		const accessToken = "stale-token";
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async (url: string) => {
-				if (url === env.CHATGPT_RESPONSES_URL) throw new Error(`socket failed with ${accessToken}`);
-				return new Response("instructions");
-			})
-		);
+	it("never selects a legacy provider even when configured otherwise", async () => {
+		const result = await startUpstreamRequest(env({ OPENAI_PROVIDER: "legacy-oauth", OPENAI_CODEX_AUTH: "oauth-secret" } as Partial<Env>), "gpt-5.6", []);
+		expect(result.error?.status).toBe(503);
+	});
 
-		const result = await startUpstreamRequest(env, "gpt-5", []);
-		const response = await result.error!.text();
-		const logged = errorSpy.mock.calls.flat().join(" ");
-
-		expect(response).not.toContain(accessToken);
-		expect(logged).not.toContain(accessToken);
-		expect(response).toContain("Upstream request failed");
+	it("fails closed when the provider is missing", async () => {
+		const result = await startUpstreamRequest(env({ OPENAI_PROVIDER: undefined }), "gpt-5.6", []);
+		expect(result.response).toBeNull();
+		expect(result.error?.status).toBe(503);
 	});
 });
