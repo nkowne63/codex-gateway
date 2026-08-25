@@ -8,6 +8,9 @@ compatibility_flags = ["nodejs_compat"]
 # Production inference provider. The API key is a Worker secret, never committed.
 OPENAI_PROVIDER = "chatgpt-oauth"
 OPENAI_DEFAULT_MODEL = "gpt-5.6-luna"
+# Optional Workers VPC service binding. Enable with UPSTREAM_MODE=private-origin.
+# The service_id is environment-specific and must be configured outside this file.
+# CODEX_PRIVATE_ORIGIN = "..."
 
 # Cloudflare Access JWT verification (set as Worker vars; no secrets in git).
 # ACCESS_TEAM_DOMAIN = "team.example.cloudflareaccess.com"

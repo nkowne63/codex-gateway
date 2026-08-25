@@ -2,7 +2,7 @@
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/mrproper)
 
-Transform OpenAI Responses API requests into an Access-protected Cloudflare Worker endpoint. Production inference uses the OpenAI hosted Responses API with a server-side `OPENAI_API_KEY`.
+Transform OpenAI Responses API requests into an Access-protected Cloudflare Worker endpoint. Production inference can use the hosted ChatGPT Codex provider or an optional private-origin service binding.
 
 ## ✨ Features
 
@@ -217,6 +217,8 @@ The service will be available at `http://localhost:8787`
 | `OPENAI_PROVIDER` | ✅ | Must be `openai-api` |
 | `OPENAI_API_KEY` | ✅ | Server-side OpenAI API key |
 | `OPENAI_DEFAULT_MODEL` | ✅ | Default hosted model, normally `gpt-5.6-luna` |
+| `UPSTREAM_MODE` | - | Set to `private-origin` to use `CODEX_PRIVATE_ORIGIN`; unset keeps the existing ChatGPT WebSocket path |
+| `CODEX_PRIVATE_ORIGIN_TOKEN` | With private origin | Dedicated token sent only to the private origin; never reuse `GATEWAY_BEARER_TOKEN` |
 
 #### Reasoning & Intelligence
 
@@ -237,6 +239,12 @@ The service will be available at `http://localhost:8787`
 #### Authentication Security
 
 - `OPENAI_API_KEY` is required; all `/v1/*` and `/api/*` endpoints require authentication
+
+### Private origin mode
+
+For a Workers VPC/private service integration, configure a fetch-compatible `CODEX_PRIVATE_ORIGIN` service binding outside this repository and set `UPSTREAM_MODE=private-origin`. The binding must be accompanied by the `CODEX_PRIVATE_ORIGIN_TOKEN` Worker secret. The Gateway's client authentication token is not forwarded to the origin; the origin receives only its dedicated `Authorization: Bearer ...` token. `gpt-5.6` is normalized to `gpt-5.6-luna` before forwarding, and successful SSE/JSON responses are preserved.
+
+The binding is intentionally not declared in the checked-in `wrangler.toml`: Cloudflare service bindings require an environment-specific service identifier. Do not commit a placeholder `service_id`. If the mode is enabled without both the binding and token, requests fail closed with HTTP 503. With `UPSTREAM_MODE` unset, the existing ChatGPT WebSocket provider remains selected.
 - Clients must include the header: `Authorization: Bearer <your-api-key>`
 - Recommended format: `sk-` followed by a random string (e.g., `sk-1234567890abcdef...`)
 - Missing, malformed, and incorrect credentials all receive the same `401 Unauthorized` response

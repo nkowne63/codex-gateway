@@ -29,6 +29,88 @@ function websocketFixture() {
 }
 
 describe("OpenAI API upstream provider", () => {
+	it("forwards normalized Responses JSON to the private origin without forwarding the gateway token", async () => {
+		const privateOrigin = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+			new Response('{"id":"resp_private","model":"gpt-5.6-luna"}', {
+				status: 200,
+				headers: { "Content-Type": "application/json" }
+			})
+		);
+		vi.stubGlobal("fetch", vi.fn());
+		const payload = { model: "gpt-5.6", input: "hello", stream: false };
+		const result = await startUpstreamRequest(
+			env({
+				UPSTREAM_MODE: "private-origin",
+				CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"],
+				CODEX_PRIVATE_ORIGIN_TOKEN: "origin-token"
+			}),
+			"gpt-5.6",
+			[],
+			{ rawResponsesBody: JSON.stringify(payload) }
+		);
+		const [input, init] = privateOrigin.mock.calls[0];
+		expect(String(input)).toBe("https://codex-private-origin/v1/responses");
+		expect(init?.method).toBe("POST");
+		const headers = new Headers(init?.headers);
+		expect(headers.get("Authorization")).toBe("Bearer origin-token");
+		expect(headers.get("X-Gateway-Authorization")).toBeNull();
+		expect(JSON.parse(String(init?.body))).toEqual({ ...payload, model: "gpt-5.6-luna" });
+		expect(result.error).toBeNull();
+		expect(await result.response?.text()).toContain("gpt-5.6-luna");
+	});
+
+	it("preserves private-origin SSE responses", async () => {
+		const privateOrigin = vi.fn(async () =>
+			new Response('data: {"type":"response.completed"}\n\n', {
+				status: 200,
+				headers: { "Content-Type": "text/event-stream" }
+			})
+		);
+		const result = await startUpstreamRequest(
+			env({
+				UPSTREAM_MODE: "private-origin",
+				CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"],
+				CODEX_PRIVATE_ORIGIN_TOKEN: "origin-token"
+			}),
+			"gpt-5.6-luna",
+			[],
+			{ rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", stream: true }) }
+		);
+		expect(result.alreadySse).toBe(true);
+		expect(await result.response?.text()).toBe('data: {"type":"response.completed"}\n\n');
+	});
+
+	it("fails closed when private-origin mode has no binding or token", async () => {
+		const fetchMock = vi.fn(async () => new Response("unexpected"));
+		vi.stubGlobal("fetch", fetchMock);
+		const result = await startUpstreamRequest(env({ UPSTREAM_MODE: "private-origin" }), "gpt-5.6", [], {
+			rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello" })
+		});
+		expect(result.response).toBeNull();
+		expect(result.error?.status).toBe(503);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("uses the existing websocket provider when upstream mode is omitted", async () => {
+		const { socket } = websocketFixture();
+		const upstream = vi.fn(async () => {
+			const response = new Response(null, { status: 200 });
+			Object.defineProperty(response, "webSocket", { value: socket });
+			return response;
+		});
+		vi.stubGlobal("fetch", upstream);
+		const result = await startUpstreamRequest(
+			env({
+				OPENAI_PROVIDER: "chatgpt-oauth",
+				OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token" } })
+			}),
+			"gpt-5.6",
+			[],
+			{ rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello" }) }
+		);
+		expect(result.error).toBeNull();
+		expect(upstream).toHaveBeenCalledWith(expect.stringContaining("chatgpt.com/backend-api/codex/responses"), expect.anything());
+	});
 	it("uses CLI-compatible WS handshake headers and normalizes response.create", async () => {
 		const { socket } = websocketFixture();
 		const upstream = vi.fn(async (url: string) => {

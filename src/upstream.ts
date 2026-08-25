@@ -41,6 +41,16 @@ export async function startUpstreamRequest(
 	}
 ): Promise<{ response: Response | null; error: Response | null; alreadySse?: boolean }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
+	const privateOriginMode = env.UPSTREAM_MODE === "private-origin";
+	if (privateOriginMode && (!env.CODEX_PRIVATE_ORIGIN || !env.CODEX_PRIVATE_ORIGIN_TOKEN)) {
+		return {
+			response: null,
+			error: new Response(JSON.stringify({ error: { message: "Private origin is not configured" } }), {
+				status: 503,
+				headers: { "Content-Type": "application/json" }
+			})
+		};
+	}
 	if (env.OPENAI_PROVIDER !== "openai-api" && env.OPENAI_PROVIDER !== "chatgpt-oauth") {
 		return {
 			response: null,
@@ -60,7 +70,7 @@ export async function startUpstreamRequest(
 			})
 		};
 	}
-	const oauthAuth = isChatGptOAuth ? await AuthStore.getFresh(env, Date.now()) : null;
+	const oauthAuth = isChatGptOAuth && !privateOriginMode ? await AuthStore.getFresh(env, Date.now()) : null;
 	if (isChatGptOAuth && !oauthAuth?.accessToken) {
 		return {
 			response: null,
@@ -134,6 +144,9 @@ export async function startUpstreamRequest(
 		"Content-Type": "application/json",
 		"User-Agent": "codex_cli_rs/0.149.1"
 	};
+	if (privateOriginMode) {
+		return startPrivateOriginRequest(env.CODEX_PRIVATE_ORIGIN!, env.CODEX_PRIVATE_ORIGIN_TOKEN!, requestBody, options?.signal);
+	}
 	if (isChatGptOAuth) {
 		headers["Authorization"] = `Bearer ${oauthAuth!.accessToken}`;
 		if (oauthAuth!.accountId) headers["ChatGPT-Account-ID"] = oauthAuth!.accountId;
@@ -202,6 +215,48 @@ export async function startUpstreamRequest(
 				}),
 				{ status: 502, headers: { "Content-Type": "application/json" } }
 			)
+		};
+	}
+}
+
+async function startPrivateOriginRequest(
+	origin: Fetcher,
+	token: string,
+	requestBody: string,
+	signal?: AbortSignal
+): Promise<{ response: Response | null; error: Response | null; alreadySse?: boolean }> {
+	try {
+		const upstreamResponse = await origin.fetch("https://codex-private-origin/v1/responses", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+				Accept: requestBody.includes('"stream":true') ? "text/event-stream" : "application/json"
+			},
+			body: requestBody,
+			signal
+		});
+		if (!upstreamResponse.ok) {
+			return {
+				response: null,
+				error: new Response(JSON.stringify({ error: { message: "Private origin request failed" } }), {
+					status: upstreamResponse.status,
+					headers: { "Content-Type": "application/json" }
+				})
+			};
+		}
+		return {
+			response: upstreamResponse,
+			error: null,
+			alreadySse: upstreamResponse.headers.get("content-type")?.includes("text/event-stream") === true
+		};
+	} catch {
+		return {
+			response: null,
+			error: new Response(JSON.stringify({ error: { message: "Private origin request failed" } }), {
+				status: 502,
+				headers: { "Content-Type": "application/json" }
+			})
 		};
 	}
 }

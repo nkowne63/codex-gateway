@@ -34,6 +34,9 @@ export interface Env {
 	OPENAI_PROVIDER?: "openai-api" | "chatgpt-oauth";
 	OPENAI_API_KEY?: string;
 	OPENAI_DEFAULT_MODEL?: string;
+	UPSTREAM_MODE?: "private-origin";
+	CODEX_PRIVATE_ORIGIN?: Fetcher;
+	CODEX_PRIVATE_ORIGIN_TOKEN?: string;
 }
 
 export type AuthTokens = {

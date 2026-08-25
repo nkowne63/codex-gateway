@@ -13,6 +13,11 @@ CHATGPT_LOCAL_CLIENT_ID=your_client_id_here
 CHATGPT_RESPONSES_URL=https://chatgpt.com/backend-api/codex/responses
 CHATGPT_TRANSPORT=websocket
 
+# Optional private-origin service binding. Configure the binding in Wrangler/Terraform
+# and set the token as a Worker secret; never reuse the gateway bearer token.
+# UPSTREAM_MODE=private-origin
+# CODEX_PRIVATE_ORIGIN_TOKEN=replace-with-a-private-origin-secret
+
 # Authentication - paste your auth.json content here (as a JSON string)
 # You can get this by running the Codex login and copying the auth.json content
 OPENAI_CODEX_AUTH={"OPENAI_API_KEY": null, "tokens": {"id_token": "...", "access_token": "...", "refresh_token": "...", "account_id": "..."}, "last_refresh": "...", "expires_at": "..."}
