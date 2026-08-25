@@ -6,6 +6,7 @@ const env = (extra: Partial<Env> = {}) =>
 	({
 		OPENAI_PROVIDER: "openai-api",
 		OPENAI_API_KEY: "test-api-key",
+		CHATGPT_TRANSPORT: "http",
 		...extra
 	}) as Env;
 

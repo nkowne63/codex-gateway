@@ -23,6 +23,7 @@ export interface Env {
 	ACCESS_AUDIENCE_V1?: string;
 	CHATGPT_LOCAL_CLIENT_ID?: string;
 	CHATGPT_RESPONSES_URL?: string;
+	CHATGPT_TRANSPORT?: "websocket" | "http";
 	OPENAI_CODEX_AUTH?: string;
 	DEBUG_MODEL?: string;
 	REASONING_EFFORT?: ReasoningEffort;

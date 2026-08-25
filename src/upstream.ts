@@ -36,9 +36,10 @@ export async function startUpstreamRequest(
 		reasoningParam?: ReasoningParam;
 		promptCacheKey?: string;
 		responsesPayload?: Record<string, unknown>;
-		rawResponsesBody?: string;
+			rawResponsesBody?: string;
+		signal?: AbortSignal;
 	}
-): Promise<{ response: Response | null; error: Response | null }> {
+): Promise<{ response: Response | null; error: Response | null; alreadySse?: boolean }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
 	if (env.OPENAI_PROVIDER !== "openai-api" && env.OPENAI_PROVIDER !== "chatgpt-oauth") {
 		return {
@@ -76,7 +77,7 @@ export async function startUpstreamRequest(
 	}
 
 	const requestUrl = isChatGptOAuth
-		? "https://chatgpt.com/backend-api/codex/responses"
+		? env.CHATGPT_RESPONSES_URL || "https://chatgpt.com/backend-api/codex/responses"
 		: "https://api.openai.com/v1/responses";
 
 	const sessionId = options?.promptCacheKey || (await stablePromptCacheKey(crypto.randomUUID(), instructions || model));
@@ -152,12 +153,16 @@ export async function startUpstreamRequest(
 		headers["Accept"] = isChatGptOAuth ? "text/event-stream" : "application/json";
 	}
 	if (isChatGptOAuth) headers["OpenAI-Beta"] = "responses=2026-02-06";
+	if (isChatGptOAuth && (env.CHATGPT_TRANSPORT || "websocket") === "websocket") {
+		return startChatGptWebSocket(requestUrl, headers, requestBody, options?.signal);
+	}
 
 	try {
 		const upstreamResponse = await fetch(requestUrl, {
 			method: "POST",
 			headers: headers,
 			body: requestBody
+			, signal: options?.signal
 			// Cloudflare Workers fetch does not have a 'timeout' option like requests.
 			// You might need to implement a custom timeout using AbortController if necessary.
 		});
@@ -196,5 +201,49 @@ export async function startUpstreamRequest(
 				{ status: 502, headers: { "Content-Type": "application/json" } }
 			)
 		};
+	}
+}
+
+async function startChatGptWebSocket(
+	requestUrl: string,
+	headers: HeadersInit,
+	requestBody: string,
+	signal?: AbortSignal
+): Promise<{ response: Response | null; error: Response | null; alreadySse?: boolean }> {
+	const wsHeaders = new Headers(headers);
+	wsHeaders.set("Upgrade", "websocket");
+	wsHeaders.set("Accept", "text/event-stream");
+	wsHeaders.set("OpenAI-Beta", "responses_websockets=2026-02-06");
+	try {
+		const upstream = await fetch(requestUrl, { headers: wsHeaders, signal });
+		if (upstream.status === 403) return { response: null, error: new Response(JSON.stringify({ error: { message: "Upstream WebSocket access denied" } }), { status: 403, headers: { "Content-Type": "application/json" } }) };
+		const socket = upstream.webSocket;
+		if (!socket) return { response: null, error: new Response(JSON.stringify({ error: { message: "Upstream WebSocket upgrade failed" } }), { status: 502, headers: { "Content-Type": "application/json" } }) };
+		(socket.accept as unknown as (options: { allowHalfOpen: boolean }) => void)({ allowHalfOpen: true });
+		const body = JSON.parse(requestBody) as Record<string, unknown>;
+		const stream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				const encoder = new TextEncoder();
+				const close = () => { try { socket.close(); } catch {} controller.close(); };
+				const onAbort = () => close();
+				if (signal) signal.addEventListener("abort", onAbort, { once: true });
+				socket.addEventListener("message", (event) => {
+					try {
+						if (typeof event.data !== "string") return;
+						const parsed = JSON.parse(event.data) as Record<string, unknown>;
+						const data = `data: ${JSON.stringify(parsed)}\n\n`;
+						controller.enqueue(encoder.encode(data));
+						if (["response.completed", "response.failed", "response.incomplete"].includes(String(parsed.type))) close();
+					} catch { /* malformed upstream events are not reflected */ }
+				});
+				socket.addEventListener("close", close, { once: true });
+				socket.addEventListener("error", close, { once: true });
+				try { socket.send(JSON.stringify({ type: "response.create", response: body })); }
+				catch { close(); }
+			}
+		});
+		return { response: new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } }), error: null, alreadySse: true };
+	} catch {
+		return { response: null, error: new Response(JSON.stringify({ error: { message: "Upstream WebSocket request failed" } }), { status: 502, headers: { "Content-Type": "application/json" } }) };
 	}
 }

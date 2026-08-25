@@ -104,7 +104,7 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 		typeof payload.reasoning === "object" && payload.reasoning !== null
 			? (payload.reasoning as { effort?: string; summary?: string })
 			: undefined;
-	const { response: upstream, error } = await startUpstreamRequest(c.env, model, inputItems, {
+	const { response: upstream, error, alreadySse } = await startUpstreamRequest(c.env, model, inputItems, {
 		instructions,
 		tools: Array.isArray(payload.tools) ? (payload.tools as Tool[]) : [],
 		toolChoice: payload.tool_choice as "auto" | "none" | "required" | { type: string; function: { name: string } },
@@ -116,13 +116,14 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 		),
 		promptCacheKey,
 		responsesPayload: payload,
-		rawResponsesBody: JSON.stringify(payload)
+		rawResponsesBody: JSON.stringify(payload),
+		signal: c.req.raw.signal
 	});
 	if (error) return responseError("Upstream request failed", error.status || 502);
 	if (!upstream) return responseError("Upstream request failed", 502);
 
 	if (payload.stream) {
-		return new Response(await sseTranslateResponses(upstream), {
+		return new Response(alreadySse ? upstream.body : await sseTranslateResponses(upstream), {
 			status: upstream.status,
 			headers: {
 				"Content-Type": "text/event-stream",

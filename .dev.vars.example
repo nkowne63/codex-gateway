@@ -11,6 +11,7 @@ GATEWAY_BEARER_TOKEN=replace-with-a-long-random-secret
 # ChatGPT API Configuration
 CHATGPT_LOCAL_CLIENT_ID=your_client_id_here
 CHATGPT_RESPONSES_URL=https://chatgpt.com/backend-api/codex/responses
+CHATGPT_TRANSPORT=websocket
 
 # Authentication - paste your auth.json content here (as a JSON string)
 # You can get this by running the Codex login and copying the auth.json content
