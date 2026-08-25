@@ -56,7 +56,7 @@ export async function startUpstreamRequest(
 		include.push("reasoning.encrypted_content");
 	}
 
-	const requestUrl = isChatGptOAuth ? "https://chatgpt.com/backend-api/codex" : "https://api.openai.com/v1/responses";
+	const requestUrl = isChatGptOAuth ? "https://chatgpt.com/backend-api/codex/responses" : "https://api.openai.com/v1/responses";
 
 	const sessionId = options?.promptCacheKey || (await stablePromptCacheKey(crypto.randomUUID(), instructions || model));
 

@@ -20,8 +20,8 @@ describe("OpenAI API upstream provider", () => {
 			[],
 			{ rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello", stream: false }) }
 		);
-		expect(upstream).toHaveBeenCalledWith("https://chatgpt.com/backend-api/codex", expect.objectContaining({ method: "POST" }));
-		const [, init] = upstream.mock.calls.find(([url]) => url === "https://chatgpt.com/backend-api/codex")!;
+		expect(upstream).toHaveBeenCalledWith("https://chatgpt.com/backend-api/codex/responses", expect.objectContaining({ method: "POST" }));
+		const [, init] = upstream.mock.calls.find(([url]) => url === "https://chatgpt.com/backend-api/codex/responses")!;
 		const headers = new Headers(init?.headers);
 		expect(headers.get("Authorization")).toBe("Bearer oauth-token");
 		expect(headers.get("ChatGPT-Account-ID")).toBe("acct-redacted");
