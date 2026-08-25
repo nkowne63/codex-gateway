@@ -77,7 +77,34 @@ describe("OpenAI API upstream provider", () => {
 				response: { ...payload, stream: true, store: false }
 			})
 		);
+		expect(upstream.mock.calls.filter(([url]) => url.startsWith("https://raw.githubusercontent.com/")).length).toBe(0);
 		expect(JSON.stringify(socket.send.mock.calls)).not.toContain("oauth-token");
+	});
+
+	it.each([404, 500])("continues to the WS upstream when optional base instructions return %s", async (status) => {
+		const { socket } = websocketFixture();
+		const upstream = vi.fn(async (url: string) => {
+			if (url.startsWith("https://raw.githubusercontent.com/")) return new Response("unavailable", { status });
+			const response = new Response(null, { status: 200 });
+			Object.defineProperty(response, "webSocket", { value: socket });
+			return response;
+		});
+		vi.stubGlobal("fetch", upstream);
+
+		const result = await startUpstreamRequest(
+			env({
+				OPENAI_PROVIDER: "chatgpt-oauth",
+				CHATGPT_TRANSPORT: "websocket",
+				OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token" } })
+			}),
+			"gpt-5.6-luna",
+			[],
+			{ rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello" }) }
+		);
+
+		expect(result.error).toBeNull();
+		expect(result.response).not.toBeNull();
+		expect(upstream.mock.calls.some(([url]) => url === "https://chatgpt.com/backend-api/codex/responses")).toBe(true);
 	});
 
 	it.each([401, 403, 429, 500])("classifies WS handshake HTTP status %s without upstream body", async (status) => {

@@ -8,8 +8,7 @@ async function getBaseInstructions(): Promise<string> {
 			throw new Error(`Failed to fetch base instructions: ${response.status}`);
 		}
 		return await response.text();
-	} catch (error) {
-		console.error("Error fetching base instructions:", error);
+	} catch {
 		// Fallback to minimal instructions if fetch fails
 		return `You are a coding agent running in the Codex CLI, a terminal-based coding assistant. You are expected to be precise, safe, and helpful.`;
 	}
@@ -25,8 +24,7 @@ async function getGpt5CodexInstructions(): Promise<string> {
 			throw new Error(`Failed to fetch GPT-5 Codex instructions: ${response.status}`);
 		}
 		return await response.text();
-	} catch (error) {
-		console.error("Error fetching GPT-5 Codex instructions:", error);
+	} catch {
 		// Fallback to base instructions if fetch fails
 		return await getBaseInstructions();
 	}

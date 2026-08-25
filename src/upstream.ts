@@ -82,7 +82,9 @@ export async function startUpstreamRequest(
 
 	const sessionId = options?.promptCacheKey || (await stablePromptCacheKey(crypto.randomUUID(), instructions || model));
 
-	const baseInstructions = await getInstructionsForModel(model);
+	// Request-provided instructions are authoritative. Base instructions are optional
+	// enrichment for generated requests and must never gate the upstream connection.
+	const baseInstructions = instructions || (options?.rawResponsesBody === undefined ? await getInstructionsForModel(model) : "");
 
 	const responsesPayload = options?.responsesPayload;
 	const requestBody =
