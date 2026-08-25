@@ -30,7 +30,7 @@ export interface Env {
 	REASONING_COMPAT?: ReasoningCompat;
 	VERBOSE?: VerboseMode;
 	MODEL_ID_MAP?: string;
-	OPENAI_PROVIDER?: "openai-api";
+	OPENAI_PROVIDER?: "openai-api" | "chatgpt-oauth";
 	OPENAI_API_KEY?: string;
 	OPENAI_DEFAULT_MODEL?: string;
 }

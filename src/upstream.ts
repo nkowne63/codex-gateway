@@ -2,6 +2,7 @@ import { normalizeModelName } from "./utils";
 import { getInstructionsForModel } from "./instructions";
 import { stablePromptCacheKey } from "./cache_key";
 import { Env, InputItem, Tool } from "./types"; // Import types
+import { AuthStore } from "./auth_store";
 
 type ReasoningParam = {
 	effort?: string;
@@ -23,6 +24,39 @@ function logUpstreamError(status: number | "fetch-failed", requestUrl: string, m
 	console.error(`Upstream request failed status=${status} url=${safeUpstreamLocation(requestUrl)} ${metadata}`);
 }
 
+function chatgptWebSocketResponse(requestBody: string, headers: HeadersInit): Response {
+	const upstream = new WebSocketPair();
+	const client = upstream[0];
+	const server = upstream[1];
+	server.accept();
+	const stream = new ReadableStream<Uint8Array>({
+		start(controller) {
+			const encoder = new TextEncoder();
+			const send = () => {
+				try {
+					const payload = JSON.parse(requestBody) as Record<string, unknown>;
+					server.send(JSON.stringify({ type: "response.create", ...payload, stream: true }));
+				} catch {
+					controller.error(new Error("invalid upstream request"));
+				}
+			};
+			server.addEventListener("message", (event) => {
+				const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer);
+				controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+				if (data.includes('"type":"response.completed"') || data.includes('"type": "response.completed"')) {
+					controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+					controller.close();
+					server.close();
+				}
+			});
+			server.addEventListener("close", () => { try { controller.close(); } catch { /* already closed */ } });
+			send();
+		}
+	});
+	void client;
+	return new Response(stream, { status: 200, headers: { ...headers, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
+}
+
 export async function startUpstreamRequest(
 	env: Env, // Pass the environment object
 	model: string,
@@ -39,13 +73,14 @@ export async function startUpstreamRequest(
 	}
 ): Promise<{ response: Response | null; error: Response | null }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
-	if (env.OPENAI_PROVIDER !== "openai-api") {
+	if (env.OPENAI_PROVIDER !== "openai-api" && env.OPENAI_PROVIDER !== "chatgpt-oauth") {
 		return {
 			response: null,
 			error: new Response(JSON.stringify({ error: { message: "OpenAI API provider is not enabled" } }), { status: 503, headers: { "Content-Type": "application/json" } })
 		};
 	}
-	if (!env.OPENAI_API_KEY) {
+	const isChatGptOAuth = env.OPENAI_PROVIDER === "chatgpt-oauth";
+	if (!isChatGptOAuth && !env.OPENAI_API_KEY) {
 		return { response: null, error: new Response(JSON.stringify({ error: { message: "OpenAI API provider is not configured" } }), { status: 503, headers: { "Content-Type": "application/json" } }) };
 	}
 
@@ -54,7 +89,7 @@ export async function startUpstreamRequest(
 		include.push("reasoning.encrypted_content");
 	}
 
-	const requestUrl = "https://api.openai.com/v1/responses";
+	const requestUrl = isChatGptOAuth ? "https://chatgpt.com/backend-api/codex" : "https://api.openai.com/v1/responses";
 
 	const sessionId = options?.promptCacheKey || (await stablePromptCacheKey(crypto.randomUUID(), instructions || model));
 
@@ -97,8 +132,17 @@ export async function startUpstreamRequest(
 	const headers: HeadersInit = {
 		"Content-Type": "application/json"
 	};
-
-	headers["Authorization"] = `Bearer ${env.OPENAI_API_KEY}`;
+	if (isChatGptOAuth) {
+		const auth = await AuthStore.getFresh(env, Date.now());
+		if (!auth.accessToken) {
+			return { response: null, error: new Response(JSON.stringify({ error: { message: "ChatGPT OAuth provider is not configured" } }), { status: 503, headers: { "Content-Type": "application/json" } }) };
+		}
+		headers["Authorization"] = `Bearer ${auth.accessToken}`;
+		if (auth.accountId) headers["ChatGPT-Account-ID"] = auth.accountId;
+		headers["originator"] = "codex_cli_rs";
+	} else {
+		headers["Authorization"] = `Bearer ${env.OPENAI_API_KEY}`;
+	}
 	try {
 		headers["Accept"] = JSON.parse(requestBody).stream === true ? "text/event-stream" : "application/json";
 	} catch {
@@ -106,6 +150,9 @@ export async function startUpstreamRequest(
 	}
 
 	try {
+		if (isChatGptOAuth) {
+			return { response: chatgptWebSocketResponse(requestBody, headers), error: null };
+		}
 		const upstreamResponse = await fetch(requestUrl, {
 			method: "POST",
 			headers: headers,
