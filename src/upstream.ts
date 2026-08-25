@@ -97,7 +97,8 @@ export async function startUpstreamRequest(
 					});
 
 	const headers: HeadersInit = {
-		"Content-Type": "application/json"
+		"Content-Type": "application/json",
+		"User-Agent": "codex_cli_rs/0.149.1"
 	};
 	if (isChatGptOAuth) {
 		const auth = await AuthStore.getFresh(env, Date.now());

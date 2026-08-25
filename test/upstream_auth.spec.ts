@@ -26,6 +26,7 @@ describe("OpenAI API upstream provider", () => {
 		expect(headers.get("Authorization")).toBe("Bearer oauth-token");
 		expect(headers.get("ChatGPT-Account-ID")).toBe("acct-redacted");
 		expect(headers.get("originator")).toBe("codex_cli_rs");
+		expect(headers.get("User-Agent")).toBe("codex_cli_rs/0.149.1");
 		expect(headers.get("OpenAI-Beta")).toBeNull();
 		expect(String(init?.body)).not.toContain("oauth-token");
 		expect(result.response?.status).toBe(200);
