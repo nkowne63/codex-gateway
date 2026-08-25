@@ -15,7 +15,93 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
+function websocketFixture() {
+	const listeners = new Map<string, (event: { data?: string }) => void>();
+	const socket = {
+		accept: vi.fn(),
+		send: vi.fn(),
+		close: vi.fn(),
+		addEventListener: vi.fn((type: string, listener: (event: { data?: string }) => void) => {
+			listeners.set(type, listener);
+		})
+	};
+	return { socket, listeners };
+}
+
 describe("OpenAI API upstream provider", () => {
+	it("uses CLI-compatible WS handshake headers and normalizes response.create", async () => {
+		const { socket } = websocketFixture();
+		const upstream = vi.fn(async (url: string) => {
+			if (url.startsWith("https://raw.githubusercontent.com/")) return new Response("instructions", { status: 200 });
+			const response = new Response(null, { status: 200 });
+			Object.defineProperty(response, "webSocket", { value: socket });
+			return response;
+		});
+		vi.stubGlobal("fetch", upstream);
+		const payload = {
+			model: "gpt-5.6-luna",
+			input: [{ type: "message", role: "user", content: "hello" }],
+			instructions: "be precise",
+			stream: false,
+			store: true,
+			stream_options: { include_obfuscation: false },
+			client_metadata: { trace: "safe" },
+			previous_response_id: "resp_previous",
+			service_tier: "priority",
+			unknown_field: { preserved: true }
+		};
+		const result = await startUpstreamRequest(
+			env({
+				OPENAI_PROVIDER: "chatgpt-oauth",
+				CHATGPT_TRANSPORT: "websocket",
+				OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token", account_id: "acct-redacted" } })
+			}),
+			"gpt-5.6-luna",
+			[],
+			{ rawResponsesBody: JSON.stringify(payload) }
+		);
+		const [, init] = upstream.mock.calls.find(([url]) => url === "https://chatgpt.com/backend-api/codex/responses")!;
+		result.response?.body?.getReader();
+		const headers = new Headers(init?.headers);
+		expect(headers.get("Origin")).toBe("https://chatgpt.com");
+		expect(headers.get("Referer")).toBe("https://chatgpt.com/");
+		expect(headers.get("Accept-Language")).toBe("en-US,en;q=0.9");
+		expect(headers.get("x-client-request-id")).toMatch(/^[0-9a-f-]{36}$/i);
+		expect(headers.get("x-codex-installation-id")).toMatch(/^[0-9a-f-]{36}$/i);
+		expect(headers.get("OpenAI-Beta")).toBe("responses_websockets=2026-02-06");
+		expect(headers.get("Authorization")).toBe("Bearer oauth-token");
+		expect(init?.body).toBeUndefined();
+		expect(socket.send).toHaveBeenCalledWith(
+			JSON.stringify({
+				type: "response.create",
+				response: { ...payload, stream: true, store: false }
+			})
+		);
+		expect(JSON.stringify(socket.send.mock.calls)).not.toContain("oauth-token");
+	});
+
+	it.each([401, 403, 429, 500])("classifies WS handshake HTTP status %s without upstream body", async (status) => {
+		const upstream = vi.fn(async (url: string) =>
+			url.startsWith("https://raw.githubusercontent.com/")
+				? new Response("instructions", { status: 200 })
+				: new Response("upstream secret body", { status })
+		);
+		vi.stubGlobal("fetch", upstream);
+		const result = await startUpstreamRequest(
+			env({
+				OPENAI_PROVIDER: "chatgpt-oauth",
+				CHATGPT_TRANSPORT: "websocket",
+				OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token" } })
+			}),
+			"gpt-5.6-luna",
+			[],
+			{ rawResponsesBody: JSON.stringify({ input: "hello" }) }
+		);
+		expect(result.response).toBeNull();
+		expect(result.error?.status).toBe(status);
+		expect(await result.error?.text()).not.toContain("upstream secret body");
+	});
+
 	it("connects to the ChatGPT Codex upstream and proxies its response", async () => {
 		const upstream = vi.fn(
 			async () =>
