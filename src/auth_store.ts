@@ -240,7 +240,7 @@ async function coordinate(
 	}
 	const promise = (async () => {
 		if (env.AUTH_REFRESH_COORDINATOR) {
-			const stub = env.AUTH_REFRESH_COORDINATOR.get(env.AUTH_REFRESH_COORDINATOR.idFromName(accountKey));
+			const stub = env.AUTH_REFRESH_COORDINATOR.get(env.AUTH_REFRESH_COORDINATOR.idFromName(`${accountKey}:${authFingerprint(source)}`));
 			const response = await stub.fetch("https://auth-refresh.internal/credential", {
 				method: "POST",
 				headers: {
