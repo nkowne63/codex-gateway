@@ -1,0 +1,7 @@
+{
+  "name": "codex-private-origin",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "vitest run --config vitest.config.ts", "build": "tsc -p tsconfig.json", "start": "node dist/server.js"},
+  "devDependencies": {"@types/node": "^24.3.0", "typescript": "^5.5.2", "vitest": "~3.2.0"}
+}
