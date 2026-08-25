@@ -135,6 +135,10 @@ export async function startUpstreamRequest(
 		headers["Authorization"] = `Bearer ${oauthAuth!.accessToken}`;
 		if (oauthAuth!.accountId) headers["ChatGPT-Account-ID"] = oauthAuth!.accountId;
 		headers["originator"] = "codex_cli_rs";
+		headers["Origin"] = "https://chatgpt.com";
+		headers["Referer"] = "https://chatgpt.com/";
+		headers["Accept-Language"] = "en-US,en;q=0.9";
+		headers["x-client-request-id"] = crypto.randomUUID();
 	} else {
 		headers["Authorization"] = `Bearer ${env.OPENAI_API_KEY}`;
 	}

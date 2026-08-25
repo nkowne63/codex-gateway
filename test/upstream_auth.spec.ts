@@ -45,10 +45,34 @@ describe("OpenAI API upstream provider", () => {
 		expect(headers.get("User-Agent")).toBe("codex_cli_rs/0.149.1");
 		expect(headers.get("Accept")).toBe("text/event-stream");
 		expect(headers.get("OpenAI-Beta")).toBe("responses=2026-02-06");
+		expect(headers.get("Origin")).toBe("https://chatgpt.com");
+		expect(headers.get("Referer")).toBe("https://chatgpt.com/");
+		expect(headers.get("Accept-Language")).toBe("en-US,en;q=0.9");
+		expect(headers.get("x-client-request-id")).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+		);
 		expect(JSON.parse(String(init?.body))).toMatchObject({ model: "gpt-5.6-luna", stream: false });
 		expect(String(init?.body)).not.toContain("oauth-token");
 		expect(result.response?.status).toBe(200);
 		expect(await result.response?.json()).toMatchObject({ id: "resp_hosted" });
+	});
+
+	it("creates a fresh client request UUID for each OAuth upstream request", async () => {
+		const upstream = vi.fn(async () => new Response("ok", { status: 200 }));
+		vi.stubGlobal("fetch", upstream);
+		const oauthEnv = env({
+			OPENAI_PROVIDER: "chatgpt-oauth",
+			OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token", account_id: "acct-redacted" } })
+		});
+		await startUpstreamRequest(oauthEnv, "gpt-5.6-luna", [], { rawResponsesBody: JSON.stringify({ input: "one" }) });
+		await startUpstreamRequest(oauthEnv, "gpt-5.6-luna", [], { rawResponsesBody: JSON.stringify({ input: "two" }) });
+		const ids = upstream.mock.calls
+			.filter(([url]) => url === "https://chatgpt.com/backend-api/codex/responses")
+			.map(([, init]) => new Headers(init?.headers).get("x-client-request-id"));
+		expect(ids).toHaveLength(2);
+		expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/i);
+		expect(ids[1]).toMatch(/^[0-9a-f-]{36}$/i);
+		expect(ids[0]).not.toBe(ids[1]);
 	});
 
 	it("normalizes the legacy model while preserving the rest of the OAuth Responses body", async () => {
