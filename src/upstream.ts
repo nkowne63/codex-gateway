@@ -24,39 +24,6 @@ function logUpstreamError(status: number | "fetch-failed", requestUrl: string, m
 	console.error(`Upstream request failed status=${status} url=${safeUpstreamLocation(requestUrl)} ${metadata}`);
 }
 
-function chatgptWebSocketResponse(requestBody: string, headers: HeadersInit): Response {
-	const upstream = new WebSocketPair();
-	const client = upstream[0];
-	const server = upstream[1];
-	server.accept();
-	const stream = new ReadableStream<Uint8Array>({
-		start(controller) {
-			const encoder = new TextEncoder();
-			const send = () => {
-				try {
-					const payload = JSON.parse(requestBody) as Record<string, unknown>;
-					server.send(JSON.stringify({ type: "response.create", ...payload, stream: true }));
-				} catch {
-					controller.error(new Error("invalid upstream request"));
-				}
-			};
-			server.addEventListener("message", (event) => {
-				const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer);
-				controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-				if (data.includes('"type":"response.completed"') || data.includes('"type": "response.completed"')) {
-					controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-					controller.close();
-					server.close();
-				}
-			});
-			server.addEventListener("close", () => { try { controller.close(); } catch { /* already closed */ } });
-			send();
-		}
-	});
-	void client;
-	return new Response(stream, { status: 200, headers: { ...headers, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
-}
-
 export async function startUpstreamRequest(
 	env: Env, // Pass the environment object
 	model: string,
@@ -150,9 +117,6 @@ export async function startUpstreamRequest(
 	}
 
 	try {
-		if (isChatGptOAuth) {
-			return { response: chatgptWebSocketResponse(requestBody, headers), error: null };
-		}
 		const upstreamResponse = await fetch(requestUrl, {
 			method: "POST",
 			headers: headers,

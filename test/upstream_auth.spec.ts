@@ -11,6 +11,27 @@ const env = (extra: Partial<Env> = {}) => ({
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("OpenAI API upstream provider", () => {
+	it("connects to the ChatGPT Codex upstream and proxies its response", async () => {
+		const upstream = vi.fn(async () => new Response(JSON.stringify({ id: "resp_hosted", status: "completed" }), { status: 200, headers: { "Content-Type": "application/json" } }));
+		vi.stubGlobal("fetch", upstream);
+		const result = await startUpstreamRequest(
+			env({ OPENAI_PROVIDER: "chatgpt-oauth", OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token", account_id: "acct-redacted" } }) }),
+			"gpt-5.6",
+			[],
+			{ rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello", stream: false }) }
+		);
+		expect(upstream).toHaveBeenCalledWith("https://chatgpt.com/backend-api/codex", expect.objectContaining({ method: "POST" }));
+		const [, init] = upstream.mock.calls.find(([url]) => url === "https://chatgpt.com/backend-api/codex")!;
+		const headers = new Headers(init?.headers);
+		expect(headers.get("Authorization")).toBe("Bearer oauth-token");
+		expect(headers.get("ChatGPT-Account-ID")).toBe("acct-redacted");
+		expect(headers.get("originator")).toBe("codex_cli_rs");
+		expect(headers.get("OpenAI-Beta")).toBeNull();
+		expect(String(init?.body)).not.toContain("oauth-token");
+		expect(result.response?.status).toBe(200);
+		expect(await result.response?.json()).toMatchObject({ id: "resp_hosted" });
+	});
+
 	it("fails closed with 503 when the provider key is missing", async () => {
 		const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
 		const result = await startUpstreamRequest(env({ OPENAI_API_KEY: undefined }), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello" }) });
