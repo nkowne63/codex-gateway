@@ -6,7 +6,7 @@ export function normalizeModelName(name: string | null | undefined, debugModel: 
 		return debugModel.trim();
 	}
 	if (typeof name !== "string" || !name.trim()) {
-		return "gpt-5";
+		return "gpt-5.6";
 	}
 	const base = name.split(":", 1)[0].trim();
 
@@ -20,7 +20,7 @@ export function normalizeModelName(name: string | null | undefined, debugModel: 
 		gpt5: "gpt-5",
 		"gpt-5-latest": "gpt-5",
 		"gpt-5": "gpt-5",
-		"gpt-5.6": "gpt-5.6-sol",
+		"gpt-5.6": "gpt-5.6",
 		"homelab-codex": "gpt-5.6-luna",
 		codex: "codex-mini-latest",
 		"codex-mini": "codex-mini-latest",

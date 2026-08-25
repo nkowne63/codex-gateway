@@ -207,6 +207,16 @@ describe("openaiAuthMiddleware", () => {
 		expect(await response.json()).toEqual({ error: { message: "Unauthorized" } });
 	});
 
+	it("fails closed for authenticated Ollama routes", async () => {
+		const response = await ollama.fetch(
+			new Request("https://gateway.test/tags", { headers: { Authorization: "Bearer client-key" } }),
+			{ GATEWAY_BEARER_TOKEN: "client-key" } as Env
+		);
+
+		expect(response.status).toBe(410);
+		expect(await response.json()).toEqual({ error: { message: "Ollama/local backend is disabled" } });
+	});
+
 	it.each([
 		[openai, "POST", "/v1/chat/completions"],
 		[openai, "POST", "/v1/completions"],

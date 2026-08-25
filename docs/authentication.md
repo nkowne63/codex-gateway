@@ -52,17 +52,9 @@ curl -X POST https://your-worker.your-subdomain.workers.dev/v1/chat/completions 
   }'
 ```
 
-#### Ollama Chat
+#### Disabled local endpoints
 
-```bash
-curl -X POST https://your-worker.your-subdomain.workers.dev/api/chat \
-  -H "Authorization: Bearer <GATEWAY_BEARER_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "llama2",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
+The legacy Ollama routes under `/api/*` are fail-closed and return `410 Gone` after authentication. They do not proxy to a local backend.
 
 ## Error Responses
 

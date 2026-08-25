@@ -11,7 +11,6 @@ export type ToolChoiceType = "auto" | "none" | "required" | { type: "function"; 
 export type InputItemType = "message" | "function_call" | "function_call_output";
 
 export interface Env {
-	CODEX_SHIM?: Fetcher;
 	KV?: KVNamespace; // Optional KV namespace for token storage
 	AUTH_REFRESH_COORDINATOR?: DurableObjectNamespace;
 	OAUTH_LOGIN_COORDINATOR?: DurableObjectNamespace;
@@ -22,11 +21,9 @@ export interface Env {
 	ACCESS_AUDIENCE?: string;
 	ACCESS_AUDIENCE_API?: string;
 	ACCESS_AUDIENCE_V1?: string;
-	OPENAI_API_KEY: string;
 	CHATGPT_LOCAL_CLIENT_ID: string;
 	CHATGPT_RESPONSES_URL: string;
 	OPENAI_CODEX_AUTH?: string;
-	OLLAMA_API_URL?: string;
 	DEBUG_MODEL?: string;
 	REASONING_EFFORT?: ReasoningEffort;
 	REASONING_SUMMARY?: ReasoningSummary;
@@ -36,7 +33,6 @@ export interface Env {
 }
 
 export type AuthTokens = {
-	OPENAI_API_KEY: string;
 	tokens: {
 		id_token: string;
 		access_token: string;
@@ -100,7 +96,6 @@ export interface TokenData {
 }
 
 export interface AuthDotJson {
-	OPENAI_API_KEY?: string;
 	tokens?: TokenData;
 	last_refresh?: string; // ISO 8601 timestamp
 	expires_at?: string; // ISO 8601 timestamp

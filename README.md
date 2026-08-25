@@ -15,7 +15,7 @@ Transform OpenAI's Codex models into OpenAI-compatible endpoints using Cloudflar
 - ⚡ **Cloudflare Workers** - Global edge deployment with low latency
 - 🔄 **Smart Token Management** - Automatic token refresh with KV storage
 - 📡 **Real-time Streaming** - Server-sent events for live responses
-- 🦙 **Ollama Compatibility** - Full Ollama API support for local model workflows
+- 🚫 **Local backends disabled** - Ollama and other local inference paths fail closed; inference uses the hosted Codex Responses endpoint
 - 🎛️ **Flexible Tool Support** - OpenAI-compatible function calling
 
 ## 🚀 Quick Start
@@ -147,9 +147,6 @@ OPENAI_CODEX_AUTH={"tokens":{"id_token":"eyJ...","access_token":"sk-proj-...","r
 CHATGPT_LOCAL_CLIENT_ID=your_client_id_here
 CHATGPT_RESPONSES_URL=https://chatgpt.com/backend-api/codex/responses
 
-# Optional: Ollama integration
-OLLAMA_API_URL=http://localhost:11434
-
 # Optional: Reasoning configuration
 REASONING_EFFORT=medium
 REASONING_SUMMARY=auto
@@ -240,7 +237,6 @@ The service will be available at `http://localhost:8787`
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OLLAMA_API_URL` | `http://localhost:11434` | Ollama instance URL for local model integration |
 | `DEBUG_MODEL` | - | Override model for debugging purposes |
 | `MODEL_ID_MAP` | - | JSON object mapping OS-facing model IDs to Codex backend IDs, e.g. `{"homelab-codex":"gpt-5-codex"}` |
 | `VERBOSE` | `false` | Enable detailed debug logging |
@@ -368,39 +364,9 @@ Authorization: Bearer sk-your-api-key-here
 }
 ```
 
-### Ollama-Compatible Endpoints
+### Disabled local endpoints
 
-#### Chat Interface
-```http
-POST /api/chat
-Authorization: Bearer sk-your-api-key-here
-Content-Type: application/json
-
-{
-  "model": "llama2",
-  "messages": [
-    {"role": "user", "content": "Hello!"}
-  ],
-  "stream": true
-}
-```
-
-#### List Models
-```http
-GET /api/tags
-Authorization: Bearer sk-your-api-key-here
-```
-
-#### Model Information
-```http
-POST /api/show
-Authorization: Bearer sk-your-api-key-here
-Content-Type: application/json
-
-{
-  "name": "llama2"
-}
-```
+The legacy `/api/*` Ollama-compatible endpoints are retained only as a compatibility surface. After authentication they return `410 Gone` and never connect to a local or WSL backend.
 
 ### Utility Endpoints
 
@@ -562,16 +528,6 @@ curl -X POST https://your-worker.workers.dev/v1/chat/completions \
     ]
   }'
 
-# Ollama chat
-curl -X POST https://your-worker.workers.dev/api/chat \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-your-secret-api-key-here" \
-  -d '{
-    "model": "llama2",
-    "messages": [
-      {"role": "user", "content": "Hello world!"}
-    ]
-  }'
 ```
 
 ### LiteLLM Integration

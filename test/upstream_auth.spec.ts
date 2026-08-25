@@ -26,36 +26,23 @@ afterEach(() => {
 });
 
 describe("upstream authentication", () => {
-	it("uses the private CODEX_SHIM without OAuth credentials and preserves the request body", async () => {
-		const body = JSON.stringify({ model: "gpt-5.6-luna", input: "hello", stream: true });
-		const shimFetch = vi.fn(async (request: Request) => {
-			expect(request.url).toBe("http://codex-shim.internal/v1/responses");
-			expect((await request.json()).model).toBe("lfm25-2.6b-vllm-ctx32k");
-			expect(request.headers.get("X-Logical-Model")).toBe("gpt-5.6-luna");
-			expect(request.headers.get("Authorization")).toBeNull();
-			expect(request.headers.get("ChatGPT-Account-ID")).toBeNull();
-			return new Response("ok", { status: 200 });
-		});
-		const env = { CODEX_SHIM: { fetch: shimFetch } } as unknown as Env;
+	it("uses hosted OAuth even when a legacy shim binding is present", async () => {
+		const env = {
+			KV: createKv(),
+			CHATGPT_LOCAL_CLIENT_ID: "client-id",
+			CHATGPT_RESPONSES_URL: "https://chatgpt.test/responses",
+			CODEX_SHIM: { fetch: vi.fn() }
+		} as unknown as Env;
+		const fetchMock = vi.fn(async (url: string) =>
+			url === env.CHATGPT_RESPONSES_URL ? new Response("ok") : new Response("instructions")
+		);
+		vi.stubGlobal("fetch", fetchMock);
 
-		const result = await startUpstreamRequest(env, "gpt-5.6-luna", [], { rawResponsesBody: body });
-
-		expect(result.response?.status).toBe(200);
-		expect(shimFetch).toHaveBeenCalledOnce();
-	});
-
-	it("forces streaming on the private shim for non-streaming public Responses calls", async () => {
-		const body = JSON.stringify({ model: "gpt-5.6-luna", input: "hello", stream: false });
-		const shimFetch = vi.fn(async (request: Request) => {
-			const payload = (await request.json()) as Record<string, unknown>;
-			expect(payload.stream).toBe(true);
-			return new Response("ok", { status: 200 });
-		});
-		const env = { CODEX_SHIM: { fetch: shimFetch } } as unknown as Env;
-
-		const result = await startUpstreamRequest(env, "gpt-5.6-luna", [], { rawResponsesBody: body });
+		const result = await startUpstreamRequest(env, "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ model: "gpt-5.6", input: "hello" }) });
 
 		expect(result.response?.status).toBe(200);
+		expect(env.CODEX_SHIM.fetch).not.toHaveBeenCalled();
+		expect(fetchMock.mock.calls.some(([url]) => url === env.CHATGPT_RESPONSES_URL)).toBe(true);
 	});
 
 	it("preserves supported Responses fields while overriding gateway-controlled fields", async () => {

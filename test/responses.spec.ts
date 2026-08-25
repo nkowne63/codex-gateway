@@ -247,7 +247,7 @@ describe("mapModelId", () => {
 	it("uses configured mappings and a deterministic normalized fallback", () => {
 		expect(mapModelId("homelab-codex", env)).toBe("gpt-5-codex");
 		expect(mapModelId("gpt-5:latest", env)).toBe("gpt-5");
-		expect(mapModelId("gpt-5.6", {} as Env)).toBe("gpt-5.6-sol");
+		expect(mapModelId("gpt-5.6", {} as Env)).toBe("gpt-5.6");
 		expect(mapModelId("homelab-codex", {} as Env)).toBe("gpt-5.6-luna");
 	});
 });

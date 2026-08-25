@@ -352,24 +352,9 @@ curl -X POST http://localhost:8787/v1/completions \
 curl http://localhost:8787/v1/models
 ```
 
-### Ollama-Compatible Endpoints
+### Disabled local endpoints
 
-```bash
-# Chat with Ollama format
-curl -X POST http://localhost:8787/api/chat \
-  -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"llama2","messages":[{"role":"user","content":"Hello!"}]}'
-
-# Show model details
-curl -X POST http://localhost:8787/api/show \
-  -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"llama2"}'
-
-# List available models
-curl http://localhost:8787/api/tags
-```
+The legacy `/api/*` Ollama-compatible routes are fail-closed and return `410 Gone`; they do not run local inference.
 
 ## 🆚 Docker vs Cloudflare Workers
 

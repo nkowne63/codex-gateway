@@ -11,10 +11,6 @@ type ReasoningParam = {
 
 type ToolChoice = "auto" | "none" | "required" | { type: string; function: { name: string } };
 
-type OllamaPayload = Record<string, unknown>;
-
-const CODEX_SHIM_MODEL = "lfm25-2.6b-vllm-ctx32k";
-
 function safeUpstreamLocation(requestUrl: string): string {
 	try {
 		const url = new URL(requestUrl);
@@ -38,47 +34,12 @@ export async function startUpstreamRequest(
 		toolChoice?: ToolChoice;
 		parallelToolCalls?: boolean;
 		reasoningParam?: ReasoningParam;
-		ollamaPath?: string; // Added for Ollama specific paths
-		ollamaPayload?: OllamaPayload; // Added for Ollama specific payloads
 		promptCacheKey?: string;
 		responsesPayload?: Record<string, unknown>;
 		rawResponsesBody?: string;
 	}
 ): Promise<{ response: Response | null; error: Response | null }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
-	const isOllamaRequest = Boolean(options?.ollamaPath);
-
-	// The VPC shim is an OpenAI-compatible private service. Keep this branch
-	// credential-free: OAuth and gateway credentials must never cross the VPC
-	// boundary, and the caller's Responses JSON must remain byte-for-byte intact.
-	if (!isOllamaRequest && env.CODEX_SHIM && options?.rawResponsesBody !== undefined) {
-		try {
-			const shimPayload = JSON.parse(options.rawResponsesBody) as Record<string, unknown>;
-			const logicalModel = typeof shimPayload.model === "string" ? shimPayload.model : model;
-			shimPayload.model = CODEX_SHIM_MODEL;
-			// The shim emits the Responses event stream only when requested. The
-			// public endpoint may be non-streaming, but responseJson() below needs
-			// the terminal event to materialize that response for the caller.
-			shimPayload.stream = true;
-			const upstreamResponse = await env.CODEX_SHIM.fetch(
-				new Request("http://codex-shim.internal/v1/responses", {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Accept: "text/event-stream",
-						"X-Logical-Model": logicalModel
-					},
-					body: JSON.stringify(shimPayload)
-				})
-			);
-			return upstreamResponse.ok
-				? { response: upstreamResponse, error: null }
-				: { response: null, error: new Response(null, { status: upstreamResponse.status }) };
-		} catch {
-			return { response: null, error: new Response(null, { status: 502 }) };
-		}
-	}
-
 	const { accessToken, accountId } = await AuthStore.getFresh(env, Date.now());
 
 	// KV token check (minimal logging)
@@ -102,64 +63,57 @@ export async function startUpstreamRequest(
 		include.push("reasoning.encrypted_content");
 	}
 
-	const requestUrl = isOllamaRequest
-		? `${env.OLLAMA_API_URL}${options?.ollamaPath}` // Assuming OLLAMA_API_URL is in Env
-		: env.CHATGPT_RESPONSES_URL;
+	const requestUrl = env.CHATGPT_RESPONSES_URL;
 
-	const sessionId = isOllamaRequest
-		? undefined
-		: options?.promptCacheKey || (await stablePromptCacheKey(crypto.randomUUID(), instructions || model));
+	const sessionId = options?.promptCacheKey || (await stablePromptCacheKey(crypto.randomUUID(), instructions || model));
 
 	const baseInstructions = await getInstructionsForModel(model);
 
 	const responsesPayload = options?.responsesPayload;
-	const requestBody = isOllamaRequest
-		? JSON.stringify(options?.ollamaPayload)
-		: options?.rawResponsesBody !== undefined
+	const requestBody =
+		options?.rawResponsesBody !== undefined
 			? options.rawResponsesBody
-		: responsesPayload
-			? JSON.stringify({
-					...structuredClone(responsesPayload),
-					model: normalizeModelName(model, env.DEBUG_MODEL),
-					stream: true,
-					prompt_cache_key: sessionId,
-					instructions: instructions || baseInstructions
-				})
-			: JSON.stringify({
-					model: normalizeModelName(model, env.DEBUG_MODEL),
-					instructions: instructions || baseInstructions, // Use fetched instructions
-					input: inputItems,
-					tools: tools || [],
-					tool_choice:
-						(toolChoice &&
-							(toolChoice === "auto" ||
-								toolChoice === "none" ||
-								toolChoice === "required" ||
-								typeof toolChoice === "object")) ||
-						toolChoice === undefined
-							? toolChoice || "auto"
-							: "auto",
-					parallel_tool_calls: parallelToolCalls || false,
-					store: false,
-					stream: true,
-					include: include,
-					prompt_cache_key: sessionId,
-					...(reasoningParam && { reasoning: reasoningParam })
-				});
+			: responsesPayload
+				? JSON.stringify({
+						...structuredClone(responsesPayload),
+						model: normalizeModelName(model, env.DEBUG_MODEL),
+						stream: true,
+						prompt_cache_key: sessionId,
+						instructions: instructions || baseInstructions
+					})
+				: JSON.stringify({
+						model: normalizeModelName(model, env.DEBUG_MODEL),
+						instructions: instructions || baseInstructions, // Use fetched instructions
+						input: inputItems,
+						tools: tools || [],
+						tool_choice:
+							(toolChoice &&
+								(toolChoice === "auto" ||
+									toolChoice === "none" ||
+									toolChoice === "required" ||
+									typeof toolChoice === "object")) ||
+							toolChoice === undefined
+								? toolChoice || "auto"
+								: "auto",
+						parallel_tool_calls: parallelToolCalls || false,
+						store: false,
+						stream: true,
+						include: include,
+						prompt_cache_key: sessionId,
+						...(reasoningParam && { reasoning: reasoningParam })
+					});
 
 	const headers: HeadersInit = {
 		"Content-Type": "application/json"
 	};
 
-	if (!isOllamaRequest) {
-		headers["Authorization"] = `Bearer ${accessToken}`;
-		headers["Accept"] = "text/event-stream";
-		headers["ChatGPT-Account-ID"] = accountId;
-		headers["OpenAI-Beta"] = "responses=experimental";
-		headers["originator"] = "codex_cli_rs";
-		if (sessionId) {
-			headers["session_id"] = sessionId;
-		}
+	headers["Authorization"] = `Bearer ${accessToken}`;
+	headers["Accept"] = "text/event-stream";
+	headers["ChatGPT-Account-ID"] = accountId;
+	headers["OpenAI-Beta"] = "responses=experimental";
+	headers["originator"] = "codex_cli_rs";
+	if (sessionId) {
+		headers["session_id"] = sessionId;
 	}
 
 	try {
@@ -185,15 +139,13 @@ export async function startUpstreamRequest(
 						"Content-Type": "application/json"
 					};
 
-					if (!isOllamaRequest) {
-						headers["Authorization"] = `Bearer ${refreshedAuth.accessToken}`;
-						headers["Accept"] = "text/event-stream";
-						headers["ChatGPT-Account-ID"] = refreshedAuth.accountId || accountId;
-						headers["OpenAI-Beta"] = "responses=experimental";
-						headers["originator"] = "codex_cli_rs";
-						if (sessionId) {
-							headers["session_id"] = sessionId;
-						}
+					headers["Authorization"] = `Bearer ${refreshedAuth.accessToken}`;
+					headers["Accept"] = "text/event-stream";
+					headers["ChatGPT-Account-ID"] = refreshedAuth.accountId || accountId;
+					headers["OpenAI-Beta"] = "responses=experimental";
+					headers["originator"] = "codex_cli_rs";
+					if (sessionId) {
+						headers["session_id"] = sessionId;
 					}
 
 					const retryResponse = await fetch(requestUrl, {
