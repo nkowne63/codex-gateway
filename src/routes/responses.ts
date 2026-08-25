@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { getInstructionsForModel } from "../instructions";
-import { mapModelId } from "../model_mapping";
+import { isKnownModelId, mapModelId } from "../model_mapping";
 import { openaiAuthMiddleware } from "../middleware/openaiAuthMiddleware";
 import { buildReasoningParam } from "../reasoning";
 import { sanitizeEventData, sseTranslateResponses } from "../sse";
@@ -16,7 +16,6 @@ function responseError(message: string, status: number) {
 		headers: { "Content-Type": "application/json" }
 	});
 }
-
 
 async function responseJson(upstream: Response, model: string, upstreamIsSse: boolean): Promise<Response> {
 	const contentType = upstream.headers.get("content-type") || "";
@@ -97,6 +96,7 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 	if (!inputItems.length) return responseError("Request must include input", 400);
 
 	const model = mapModelId(payload.model as string | undefined, c.env);
+	if (!isKnownModelId(model, c.env)) return responseError("Unknown model", 400);
 	const instructions =
 		typeof payload.instructions === "string" ? payload.instructions : await getInstructionsForModel(model);
 	const promptCacheKey = await resolvePromptCacheKey(payload, c.req.raw.headers, instructions);

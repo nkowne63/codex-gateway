@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 # Production inference provider. The API key is a Worker secret, never committed.
 OPENAI_PROVIDER = "chatgpt-oauth"
-OPENAI_DEFAULT_MODEL = "gpt-5.6"
+OPENAI_DEFAULT_MODEL = "gpt-5.6-luna"
 
 # Cloudflare Access JWT verification (set as Worker vars; no secrets in git).
 # ACCESS_TEAM_DOMAIN = "team.example.cloudflareaccess.com"

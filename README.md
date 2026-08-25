@@ -140,7 +140,7 @@ Create a `.dev.vars` file:
 # Required: server-side OpenAI API key (never expose to clients)
 OPENAI_API_KEY=sk-your-secret-api-key-here
 OPENAI_PROVIDER=openai-api
-OPENAI_DEFAULT_MODEL=gpt-5.6
+OPENAI_DEFAULT_MODEL=gpt-5.6-luna
 
 # Historical OAuth login variables are deprecated and not used by the API provider.
 
@@ -216,7 +216,7 @@ The service will be available at `http://localhost:8787`
 |----------|----------|-------------|
 | `OPENAI_PROVIDER` | ✅ | Must be `openai-api` |
 | `OPENAI_API_KEY` | ✅ | Server-side OpenAI API key |
-| `OPENAI_DEFAULT_MODEL` | ✅ | Default hosted model, normally `gpt-5.6` |
+| `OPENAI_DEFAULT_MODEL` | ✅ | Default hosted model, normally `gpt-5.6-luna` |
 
 #### Reasoning & Intelligence
 

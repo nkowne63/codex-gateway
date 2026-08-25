@@ -38,7 +38,7 @@ Edit [`.dev.vars`](./.dev.vars) with your configuration:
 # OpenAI API Configuration
 OPENAI_API_KEY=your_api_key_here
 OPENAI_PROVIDER=openai-api
-OPENAI_DEFAULT_MODEL=gpt-5.6
+OPENAI_DEFAULT_MODEL=gpt-5.6-luna
 
 # Optional: Reasoning Configuration
 REASONING_EFFORT=medium
@@ -81,7 +81,7 @@ The service will be available at `http://localhost:8787`
 |----------|-------------|----------|---------|
 | `OPENAI_PROVIDER` | Production provider; must be `openai-api` | ✅ | `openai-api` |
 | `OPENAI_API_KEY` | Server-side OpenAI API key secret | ✅ | - |
-| `OPENAI_DEFAULT_MODEL` | Default hosted model | ✅ | `gpt-5.6` |
+| `OPENAI_DEFAULT_MODEL` | Default hosted model | ✅ | `gpt-5.6-luna` |
 | `REASONING_EFFORT` | AI reasoning depth: `minimal`, `low`, `medium`, `high` | ❌ | `minimal` |
 | `REASONING_SUMMARY` | Summary mode: `auto`, `on`, `off` | ❌ | `auto` |
 | `REASONING_COMPAT` | Compatibility mode: `think-tags`, `standard` | ❌ | `think-tags` |
@@ -158,7 +158,7 @@ Create `.env.production`:
 NODE_ENV=production
 OPENAI_API_KEY=your_production_key
 OPENAI_PROVIDER=openai-api
-OPENAI_DEFAULT_MODEL=gpt-5.6
+OPENAI_DEFAULT_MODEL=gpt-5.6-luna
 REASONING_EFFORT=medium
 VERBOSE=false
 ```

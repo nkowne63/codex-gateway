@@ -43,12 +43,31 @@ export async function startUpstreamRequest(
 	if (env.OPENAI_PROVIDER !== "openai-api" && env.OPENAI_PROVIDER !== "chatgpt-oauth") {
 		return {
 			response: null,
-			error: new Response(JSON.stringify({ error: { message: "OpenAI API provider is not enabled" } }), { status: 503, headers: { "Content-Type": "application/json" } })
+			error: new Response(JSON.stringify({ error: { message: "OpenAI API provider is not enabled" } }), {
+				status: 503,
+				headers: { "Content-Type": "application/json" }
+			})
 		};
 	}
 	const isChatGptOAuth = env.OPENAI_PROVIDER === "chatgpt-oauth";
 	if (!isChatGptOAuth && !env.OPENAI_API_KEY) {
-		return { response: null, error: new Response(JSON.stringify({ error: { message: "OpenAI API provider is not configured" } }), { status: 503, headers: { "Content-Type": "application/json" } }) };
+		return {
+			response: null,
+			error: new Response(JSON.stringify({ error: { message: "OpenAI API provider is not configured" } }), {
+				status: 503,
+				headers: { "Content-Type": "application/json" }
+			})
+		};
+	}
+	const oauthAuth = isChatGptOAuth ? await AuthStore.getFresh(env, Date.now()) : null;
+	if (isChatGptOAuth && !oauthAuth?.accessToken) {
+		return {
+			response: null,
+			error: new Response(JSON.stringify({ error: { message: "ChatGPT OAuth provider is not configured" } }), {
+				status: 503,
+				headers: { "Content-Type": "application/json" }
+			})
+		};
 	}
 
 	const include: string[] = [];
@@ -56,7 +75,9 @@ export async function startUpstreamRequest(
 		include.push("reasoning.encrypted_content");
 	}
 
-	const requestUrl = isChatGptOAuth ? "https://chatgpt.com/backend-api/codex/responses" : "https://api.openai.com/v1/responses";
+	const requestUrl = isChatGptOAuth
+		? "https://chatgpt.com/backend-api/codex/responses"
+		: "https://api.openai.com/v1/responses";
 
 	const sessionId = options?.promptCacheKey || (await stablePromptCacheKey(crypto.randomUUID(), instructions || model));
 
@@ -65,7 +86,17 @@ export async function startUpstreamRequest(
 	const responsesPayload = options?.responsesPayload;
 	const requestBody =
 		options?.rawResponsesBody !== undefined
-			? options.rawResponsesBody
+			? (() => {
+					try {
+						const parsed = JSON.parse(options.rawResponsesBody) as Record<string, unknown>;
+						return JSON.stringify({
+							...parsed,
+							model: normalizeModelName(typeof parsed.model === "string" ? parsed.model : model, env.DEBUG_MODEL, model)
+						});
+					} catch {
+						return options.rawResponsesBody;
+					}
+				})()
 			: responsesPayload
 				? JSON.stringify({
 						...structuredClone(responsesPayload),
@@ -101,21 +132,22 @@ export async function startUpstreamRequest(
 		"User-Agent": "codex_cli_rs/0.149.1"
 	};
 	if (isChatGptOAuth) {
-		const auth = await AuthStore.getFresh(env, Date.now());
-		if (!auth.accessToken) {
-			return { response: null, error: new Response(JSON.stringify({ error: { message: "ChatGPT OAuth provider is not configured" } }), { status: 503, headers: { "Content-Type": "application/json" } }) };
-		}
-		headers["Authorization"] = `Bearer ${auth.accessToken}`;
-		if (auth.accountId) headers["ChatGPT-Account-ID"] = auth.accountId;
+		headers["Authorization"] = `Bearer ${oauthAuth!.accessToken}`;
+		if (oauthAuth!.accountId) headers["ChatGPT-Account-ID"] = oauthAuth!.accountId;
 		headers["originator"] = "codex_cli_rs";
 	} else {
 		headers["Authorization"] = `Bearer ${env.OPENAI_API_KEY}`;
 	}
 	try {
-		headers["Accept"] = JSON.parse(requestBody).stream === true ? "text/event-stream" : "application/json";
+		headers["Accept"] = isChatGptOAuth
+			? "text/event-stream"
+			: JSON.parse(requestBody).stream === true
+				? "text/event-stream"
+				: "application/json";
 	} catch {
-		headers["Accept"] = "application/json";
+		headers["Accept"] = isChatGptOAuth ? "text/event-stream" : "application/json";
 	}
+	if (isChatGptOAuth) headers["OpenAI-Beta"] = "responses=2026-02-06";
 
 	try {
 		const upstreamResponse = await fetch(requestUrl, {

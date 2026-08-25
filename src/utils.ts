@@ -1,12 +1,17 @@
 import { ChatMessage, ToolDefinition, InputItem, Tool } from "./types";
 import { getModelPreset } from "./models";
 
-export function normalizeModelName(name: string | null | undefined, debugModel: string | null | undefined, defaultModel?: string): string {
+export function normalizeModelName(
+	name: string | null | undefined,
+	debugModel: string | null | undefined,
+	defaultModel?: string
+): string {
 	if (typeof debugModel === "string" && debugModel.trim()) {
 		return debugModel.trim();
 	}
 	if (typeof name !== "string" || !name.trim()) {
-		return defaultModel?.trim() || "gpt-5.6";
+		const fallback = defaultModel?.trim() || "gpt-5.6-luna";
+		return fallback === "gpt-5.6" ? "gpt-5.6-luna" : fallback;
 	}
 	const base = name.split(":", 1)[0].trim();
 
@@ -20,7 +25,7 @@ export function normalizeModelName(name: string | null | undefined, debugModel: 
 		gpt5: "gpt-5",
 		"gpt-5-latest": "gpt-5",
 		"gpt-5": "gpt-5",
-		"gpt-5.6": "gpt-5.6",
+		"gpt-5.6": "gpt-5.6-luna",
 		"homelab-codex": "gpt-5.6-luna",
 		codex: "codex-mini-latest",
 		"codex-mini": "codex-mini-latest",

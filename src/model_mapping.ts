@@ -1,5 +1,6 @@
 import { Env } from "./types";
 import { normalizeModelName } from "./utils";
+import { MODEL_IDS, MODEL_PRESETS } from "./models";
 
 function configuredModelMap(value: string | undefined): Record<string, string> {
 	if (!value) return {};
@@ -19,5 +20,15 @@ function configuredModelMap(value: string | undefined): Record<string, string> {
 export function mapModelId(osModelId: string | undefined, env: Env): string {
 	const requested = typeof osModelId === "string" ? osModelId.trim() : "";
 	const mapped = configuredModelMap(env.MODEL_ID_MAP)[requested];
-	return mapped ? mapped.trim() : normalizeModelName(requested, env.DEBUG_MODEL, env.OPENAI_DEFAULT_MODEL);
+	return normalizeModelName(mapped || requested, env.DEBUG_MODEL, env.OPENAI_DEFAULT_MODEL);
+}
+
+export function isKnownModelId(model: string, env: Env): boolean {
+	const known = new Set<string>([...MODEL_IDS, ...MODEL_PRESETS.map((preset) => preset.model), "codex-mini-latest"]);
+	return (
+		known.has(model) ||
+		Object.values(configuredModelMap(env.MODEL_ID_MAP)).some(
+			(mapped) => normalizeModelName(mapped, env.DEBUG_MODEL) === model
+		)
+	);
 }
