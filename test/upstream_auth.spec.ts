@@ -88,6 +88,28 @@ describe("OpenAI API upstream provider", () => {
 		expect(result.alreadySse).toBe(true);
 	});
 
+	it("filters unsupported Responses fields for the strict private origin contract", async () => {
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			expect(body).toEqual({
+				model: "gpt-5.6-luna",
+				input: [{ type: "message", role: "user", content: "hello" }],
+				stream: true,
+				store: false
+			});
+			return new Response('data: {"type":"response.completed","response":{"output_text":"UI_OK"}}\n\n', {
+				status: 200,
+				headers: { "Content-Type": "text/event-stream" }
+			});
+		});
+		await startUpstreamRequest(env({
+			UPSTREAM_MODE: "private-origin",
+			CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"]
+		}), "gpt-5.6-luna", [], {
+			rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", instructions: "extra", tools: [], prompt_cache_key: "extra", stream: false })
+		});
+	});
+
 	it("preserves private-origin SSE responses", async () => {
 		const privateOrigin = vi.fn(async () =>
 			new Response('data: {"type":"response.completed"}\n\n', {

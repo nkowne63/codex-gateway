@@ -34,7 +34,8 @@ function normalizeResponsesPayloadInput(payload: Record<string, unknown>): Recor
 
 function normalizePrivateOriginPayload(payload: Record<string, unknown>): Record<string, unknown> {
 	return {
-		...normalizeResponsesPayloadInput(payload),
+		model: payload.model,
+		input: normalizeResponsesPayloadInput(payload).input,
 		stream: true,
 		store: false
 	};
