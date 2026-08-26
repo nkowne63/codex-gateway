@@ -53,6 +53,15 @@ const auth = "Bearer gateway-secret";
 afterEach(() => vi.restoreAllMocks());
 
 describe("OAuth login routes", () => {
+	it("accepts protected bootstrap credentials and returns no credential data", async () => {
+		let stored = "";
+		const vault = { idFromName: () => "default", get: () => ({ fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => { if (init?.method === "PUT") stored = String(init.body); return new Response(JSON.stringify({ ok: true })); }) }) };
+		const runtimeEnv = { ...env(createKv()), OAUTH_VAULT: vault, OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))) } as unknown as Env;
+		const response = await createOAuthLoginApp().request("/oauth/bootstrap", { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ auth: { tokens: { access_token: "a", refresh_token: "r", account_id: "acct" } } }) }, runtimeEnv);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ status: "ok" });
+		expect(stored).toContain("access_token");
+	});
 	it("saves callback credentials, refreshes them, and injects the rotated token at the private origin", async () => {
 		let credential: unknown;
 		const vault = { idFromName: () => "default", get: () => ({ fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

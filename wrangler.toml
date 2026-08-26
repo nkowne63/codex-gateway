@@ -58,6 +58,5 @@ enabled = true
 
 [[vpc_services]]
 binding = "CODEX_PRIVATE_ORIGIN"
-# Temporary WSL service; replace only this ID with the Terraform-created RPi
-# fixed-proxy service ID when homelab-os applies the Connectivity Directory resource.
-service_id = "01a0395c-f20e-7451-a8d6-30d3654805ca"
+# Terraform-managed RPi fixed ChatGPT egress proxy service.
+service_id = "01a03bed-eaaa-78c2-b6bb-b9d0e93af235"

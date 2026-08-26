@@ -47,13 +47,13 @@ async function authorized(c: { req: { raw: Request }; env: OAuthEnv }, options: 
 	return Boolean(c.env.GATEWAY_BEARER_TOKEN && token === c.env.GATEWAY_BEARER_TOKEN);
 }
 
-async function requestFields(request: Request): Promise<{ callbackUrl: string | null }> {
+async function requestFields(request: Request): Promise<{ callbackUrl: string | null; auth?: unknown }> {
 	const contentType = request.headers.get("Content-Type") || "";
 	if (contentType.includes("application/json")) {
 		try {
-			const body = (await request.json()) as { callback_url?: unknown; url?: unknown };
+			const body = (await request.json()) as { callback_url?: unknown; url?: unknown; auth?: unknown };
 			const value = body.callback_url ?? body.url;
-			return { callbackUrl: typeof value === "string" ? value : null };
+			return { callbackUrl: typeof value === "string" ? value : null, auth: body.auth };
 		} catch {
 			return { callbackUrl: null };
 		}
@@ -163,6 +163,21 @@ export function createOAuthLoginApp(options: OAuthLoginOptions = {}) {
 				? new Date(now() + exchanged.expires_in * 1000).toISOString()
 				: null;
 		await projectToKv(c.env, { tokens, lastRefresh: new Date(now()).toISOString(), expiresAt }, now());
+		return c.json({ status: "ok" });
+	});
+
+	app.post("/oauth/bootstrap", async (c) => {
+		if (!(await authorized(c, options))) return c.json({ error: "unauthorized" }, 401);
+		if (!c.env.OAUTH_VAULT || !c.env.OAUTH_VAULT_KEY) return c.json({ error: "oauth_unavailable" }, 503);
+		let input: any;
+		try { input = await c.req.json(); } catch { return c.json({ error: "invalid_request" }, 400); }
+		const tokens = input?.auth?.tokens;
+		if (!tokens || typeof tokens.access_token !== "string" || !tokens.access_token ||
+			(tokens.refresh_token !== undefined && typeof tokens.refresh_token !== "string") ||
+			(tokens.id_token !== undefined && typeof tokens.id_token !== "string") ||
+			(tokens.account_id !== undefined && typeof tokens.account_id !== "string"))
+			return c.json({ error: "invalid_request" }, 400);
+		await projectToKv(c.env, { tokens, lastRefresh: new Date().toISOString(), expiresAt: null }, Date.now());
 		return c.json({ status: "ok" });
 	});
 
