@@ -17,6 +17,38 @@ const env = {
 } as Env;
 
 describe("Responses endpoint", () => {
+	it.each(["gpt-5", "gpt-5.6-terra", "arbitrary-alias"])(
+		"rejects private-origin model %s before calling the origin",
+		async (model) => {
+			startUpstreamRequest.mockClear();
+			const response = await responses.fetch(
+				new Request("https://gateway.test/v1/responses", {
+					method: "POST",
+					headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+					body: JSON.stringify({ model, input: "hello" })
+				}),
+				{ ...env, UPSTREAM_MODE: "private-origin" } as Env
+			);
+			expect(response.status).toBe(400);
+			expect(await response.json()).toEqual({ error: { message: "Unsupported private-origin model" } });
+			expect(startUpstreamRequest).not.toHaveBeenCalled();
+		}
+	);
+
+	it("rejects an explicit invalid reasoning effort before calling the origin", async () => {
+		startUpstreamRequest.mockClear();
+		const response = await responses.fetch(
+			new Request("https://gateway.test/v1/responses", {
+				method: "POST",
+				headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+				body: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", reasoning: { effort: "invalid" } })
+			}),
+			{ ...env, UPSTREAM_MODE: "private-origin" } as Env
+		);
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: { message: "Invalid reasoning effort" } });
+		expect(startUpstreamRequest).not.toHaveBeenCalled();
+	});
 	it("maps the OS model and preserves Responses input, tools, and data images", async () => {
 		startUpstreamRequest.mockResolvedValueOnce({
 			response: new Response(

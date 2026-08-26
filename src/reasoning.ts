@@ -3,6 +3,13 @@ type ReasoningParam = {
 	summary?: string;
 };
 
+export const OFFICIAL_REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
+
+export function isValidReasoningEffort(effort: string): boolean {
+	const normalized = effort.trim().toLowerCase();
+	return OFFICIAL_REASONING_EFFORTS.includes((normalized === "minimal" ? "medium" : normalized) as (typeof OFFICIAL_REASONING_EFFORTS)[number]);
+}
+
 export function buildReasoningParam(
 	baseEffort: string = "medium",
 	baseSummary: string = "auto",
@@ -11,7 +18,7 @@ export function buildReasoningParam(
 	let effort = (baseEffort || "").trim().toLowerCase();
 	let summary = (baseSummary || "").trim().toLowerCase();
 
-	const validEfforts = new Set(["low", "medium", "high", "none", "minimal", "xhigh", "max"]);
+	const validEfforts = new Set([...OFFICIAL_REASONING_EFFORTS, "minimal"]);
 	const validSummaries = new Set(["auto", "concise", "detailed", "none"]);
 
 	if (overrides) {
@@ -25,7 +32,7 @@ export function buildReasoningParam(
 		}
 	}
 
-	if (effort === "minimal") effort = "low";
+	if (effort === "minimal") effort = "medium";
 	if (!validEfforts.has(effort)) effort = "medium";
 	if (!validSummaries.has(summary)) {
 		summary = "auto";

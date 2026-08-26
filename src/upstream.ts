@@ -39,7 +39,7 @@ function normalizePrivateOriginPayload(payload: Record<string, unknown>, default
 		typeof rawReasoning === "object" && rawReasoning !== null && typeof (rawReasoning as { effort?: unknown }).effort === "string"
 			? (rawReasoning as { effort: string }).effort.trim().toLowerCase()
 			: defaultReasoning?.effort;
-	const normalizedEffort = requestedEffort === "minimal" ? "low" : requestedEffort;
+	const normalizedEffort = requestedEffort === "minimal" ? "medium" : requestedEffort;
 	const effort = normalizedEffort && validEfforts.has(normalizedEffort) ? normalizedEffort : undefined;
 	return {
 		model: payload.model,

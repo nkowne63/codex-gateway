@@ -12,13 +12,16 @@ describe("GPT-5.6 reasoning effort", () => {
 		expect(buildReasoningParam(undefined, "auto").effort).toBe("medium");
 	});
 
-	it("maps legacy minimal to low", () => {
-		expect(buildReasoningParam("minimal", "auto").effort).toBe("low");
-		expect(buildReasoningParam("medium", "auto", { effort: "minimal" }).effort).toBe("low");
+	it("maps legacy minimal to medium", () => {
+		expect(buildReasoningParam("minimal", "auto").effort).toBe("medium");
+		expect(buildReasoningParam("medium", "auto", { effort: "minimal" }).effort).toBe("medium");
 	});
 
-	it("falls back to medium for invalid values and preserves valid configured values", () => {
+	it("keeps invalid configured values on the medium fallback", () => {
 		expect(buildReasoningParam("invalid", "auto").effort).toBe("medium");
+	});
+
+	it("keeps the configured effort when no valid override is available", () => {
 		expect(buildReasoningParam("high", "auto", { effort: "invalid" }).effort).toBe("high");
 	});
 

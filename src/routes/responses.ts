@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { getInstructionsForModel } from "../instructions";
-import { isKnownModelId, mapModelId } from "../model_mapping";
+import { isKnownModelId, isPrivateOriginModel, mapModelId } from "../model_mapping";
 import { openaiAuthMiddleware } from "../middleware/openaiAuthMiddleware";
-import { buildReasoningParam } from "../reasoning";
+import { buildReasoningParam, isValidReasoningEffort } from "../reasoning";
 import { sanitizeEventData, sseTranslateResponses } from "../sse";
 import { Env, InputItem, Tool } from "../types";
 import { startUpstreamRequest } from "../upstream";
@@ -104,6 +104,9 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 	if (!inputItems.length) return responseError("Request must include input", 400);
 
 	const model = mapModelId(payload.model as string | undefined, c.env);
+	if (c.env.UPSTREAM_MODE === "private-origin" && !isPrivateOriginModel(model)) {
+		return responseError("Unsupported private-origin model", 400);
+	}
 	if (!isKnownModelId(model, c.env)) return responseError("Unknown model", 400);
 	const instructions =
 		typeof payload.instructions === "string" ? payload.instructions : await getInstructionsForModel(model);
@@ -112,6 +115,11 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 		typeof payload.reasoning === "object" && payload.reasoning !== null
 			? (payload.reasoning as { effort?: string; summary?: string })
 			: undefined;
+	if (reasoning && Object.prototype.hasOwnProperty.call(reasoning, "effort")) {
+		if (typeof reasoning.effort !== "string" || !isValidReasoningEffort(reasoning.effort)) {
+			return responseError("Invalid reasoning effort", 400);
+		}
+	}
 	const { response: upstream, error, alreadySse } = await startUpstreamRequest(c.env, model, inputItems, {
 		instructions,
 		tools: Array.isArray(payload.tools) ? (payload.tools as Tool[]) : [],
