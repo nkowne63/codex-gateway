@@ -33,7 +33,20 @@ function normalizeResponsesPayloadInput(payload: Record<string, unknown>): Recor
 }
 
 const PRIVATE_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/;
-const PRIVATE_DESCRIPTION_MAX = 1024;
+// Official Workshop descriptions contain prose, newlines, tabs, and currently
+// reach roughly 2 KiB. Normalize them at the private-origin boundary while
+// keeping a bounded description size for upstream safety.
+const PRIVATE_DESCRIPTION_MAX = 4096;
+
+function normalizePrivateToolDescription(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	return value
+		.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, " ")
+		.replace(/\s+/gu, " ")
+		.trim()
+		.slice(0, PRIVATE_DESCRIPTION_MAX)
+		.trim();
+}
 
 function validParametersSchema(value: unknown): value is Record<string, unknown> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -56,8 +69,8 @@ function safePrivateOriginTools(value: unknown): Array<Record<string, unknown>> 
 		if (candidate.type !== "function" || typeof candidate.name !== "string" || !PRIVATE_TOOL_NAME.test(candidate.name)) return [];
 		const safe: Record<string, unknown> = { type: "function", name: candidate.name };
 		if (candidate.description !== undefined) {
-			if (typeof candidate.description !== "string" || candidate.description.length > PRIVATE_DESCRIPTION_MAX || /[\u0000-\u001f\u007f]/.test(candidate.description)) return [];
-			safe.description = candidate.description;
+			const description = normalizePrivateToolDescription(candidate.description);
+			if (description !== undefined) safe.description = description;
 		}
 		if (!validParametersSchema(candidate.parameters)) return [];
 		safe.parameters = candidate.parameters;
