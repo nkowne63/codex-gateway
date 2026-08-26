@@ -28,6 +28,10 @@ class_name = "AuthRefreshCoordinator"
 name = "OAUTH_LOGIN_COORDINATOR"
 class_name = "OAuthLoginCoordinator"
 
+[[durable_objects.bindings]]
+name = "OAUTH_VAULT"
+class_name = "OAuthVault"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AuthRefreshCoordinator"]
@@ -35,6 +39,10 @@ new_sqlite_classes = ["AuthRefreshCoordinator"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["OAuthLoginCoordinator"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["OAuthVault"]
 
 
 # --- Local Development Configuration ---

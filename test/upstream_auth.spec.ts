@@ -52,7 +52,8 @@ describe("OpenAI API upstream provider", () => {
 		expect(String(input)).toBe("https://codex-private-origin/v1/responses");
 		expect(init?.method).toBe("POST");
 		const headers = new Headers(init?.headers);
-		expect(headers.get("Authorization")).toBe("Bearer origin-token");
+		expect(headers.get("Authorization")).toBeNull();
+		expect(headers.get("X-Private-Origin-Authorization")).toBe("Bearer origin-token");
 		expect(headers.get("X-Gateway-Authorization")).toBeNull();
 		expect(JSON.parse(String(init?.body))).toEqual({ ...payload, model: "gpt-5.6-luna" });
 		expect(result.error).toBeNull();
@@ -78,6 +79,32 @@ describe("OpenAI API upstream provider", () => {
 		);
 		expect(result.alreadySse).toBe(true);
 		expect(await result.response?.text()).toBe('data: {"type":"response.completed"}\n\n');
+	});
+
+	it("injects ChatGPT OAuth headers into the private origin while keeping bearer tokens distinct", async () => {
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const headers = new Headers(init?.headers);
+			expect(headers.get("Authorization")).toBe("Bearer oauth-token");
+			expect(headers.get("X-Private-Origin-Authorization")).toBe("Bearer origin-token");
+			expect(headers.get("ChatGPT-Account-ID")).toBe("acct-redacted");
+			return new Response('data: {"type":"response.completed"}\n\n', {
+				status: 200,
+				headers: { "Content-Type": "text/event-stream" }
+			});
+		});
+		const result = await startUpstreamRequest(
+			env({
+				OPENAI_PROVIDER: "chatgpt-oauth",
+				UPSTREAM_MODE: "private-origin",
+				CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"],
+				CODEX_PRIVATE_ORIGIN_TOKEN: "origin-token",
+				OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token", account_id: "acct-redacted" } })
+			}),
+			"gpt-5.6",
+			[],
+			{ rawResponsesBody: JSON.stringify({ input: "one", stream: true }) }
+		);
+		expect(result.response?.status).toBe(200);
 	});
 
 	it("fails closed when private-origin mode has no binding or token", async () => {

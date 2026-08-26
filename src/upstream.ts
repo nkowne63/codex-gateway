@@ -70,7 +70,7 @@ export async function startUpstreamRequest(
 			})
 		};
 	}
-	const oauthAuth = isChatGptOAuth && !privateOriginMode ? await AuthStore.getFresh(env, Date.now()) : null;
+	const oauthAuth = isChatGptOAuth ? await AuthStore.getFresh(env, Date.now()) : null;
 	if (isChatGptOAuth && !oauthAuth?.accessToken) {
 		return {
 			response: null,
@@ -145,7 +145,14 @@ export async function startUpstreamRequest(
 		"User-Agent": "codex_cli_rs/0.149.1"
 	};
 	if (privateOriginMode) {
-		return startPrivateOriginRequest(env.CODEX_PRIVATE_ORIGIN!, env.CODEX_PRIVATE_ORIGIN_TOKEN!, requestBody, options?.signal);
+		return startPrivateOriginRequest(
+			env.CODEX_PRIVATE_ORIGIN!,
+			env.CODEX_PRIVATE_ORIGIN_TOKEN!,
+			requestBody,
+			oauthAuth?.accessToken || null,
+			oauthAuth?.accountId || null,
+			options?.signal
+		);
 	}
 	if (isChatGptOAuth) {
 		headers["Authorization"] = `Bearer ${oauthAuth!.accessToken}`;
@@ -223,13 +230,17 @@ async function startPrivateOriginRequest(
 	origin: Fetcher,
 	token: string,
 	requestBody: string,
+	chatGptToken: string | null,
+	accountId: string | null,
 	signal?: AbortSignal
 ): Promise<{ response: Response | null; error: Response | null; alreadySse?: boolean }> {
 	try {
 		const upstreamResponse = await origin.fetch("https://codex-private-origin/v1/responses", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${token}`,
+				...(chatGptToken ? { Authorization: `Bearer ${chatGptToken}` } : {}),
+				"X-Private-Origin-Authorization": `Bearer ${token}`,
+				...(accountId ? { "ChatGPT-Account-ID": accountId } : {}),
 				"Content-Type": "application/json",
 				Accept: requestBody.includes('"stream":true') ? "text/event-stream" : "application/json"
 			},

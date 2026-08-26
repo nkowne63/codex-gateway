@@ -14,6 +14,8 @@ export interface Env {
 	KV?: KVNamespace; // Optional KV namespace for token storage
 	AUTH_REFRESH_COORDINATOR?: DurableObjectNamespace;
 	OAUTH_LOGIN_COORDINATOR?: DurableObjectNamespace;
+	OAUTH_VAULT?: DurableObjectNamespace;
+	OAUTH_VAULT_KEY?: string;
 	GATEWAY_BEARER_TOKEN: string;
 	ACCESS_SERVICE_TOKEN_CLIENT_ID?: string;
 	ACCESS_SERVICE_TOKEN_CLIENT_SECRET?: string;

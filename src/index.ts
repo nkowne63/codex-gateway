@@ -8,6 +8,7 @@ import { createOAuthLoginPage } from "./oauth_login_page";
 import type { Env } from "./types";
 export { AuthRefreshCoordinator } from "./auth_refresh_coordinator";
 export { OAuthLoginCoordinator } from "./oauth_login_coordinator";
+export { OAuthVault } from "./oauth_vault";
 
 const app = new Hono<{ Bindings: Env }>();
 

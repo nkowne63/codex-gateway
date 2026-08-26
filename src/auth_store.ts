@@ -1,4 +1,5 @@
 import type { AuthDotJson, Env, RefreshRequest, RefreshResponse, TokenData } from "./types";
+import { vaultGet, vaultPut } from "./oauth_vault";
 
 const AUTH_TOKENS_KEY = "auth_tokens";
 const AUTH_LAST_REFRESH_KEY = "auth_last_refresh";
@@ -96,6 +97,14 @@ function fallback(env: Env): StoredAuth | null {
 }
 
 export async function loadBootstrap(env: Env, now: number, seed = true): Promise<StoredAuth | null> {
+	if (env.OAUTH_VAULT) {
+		try {
+			const vaulted = await vaultGet(env);
+			if (vaulted) return vaulted;
+		} catch {
+			return null;
+		}
+	}
 	if (env.KV) {
 		try {
 			const tokens = await env.KV.get(AUTH_TOKENS_KEY, "json");
@@ -119,6 +128,10 @@ export async function loadBootstrap(env: Env, now: number, seed = true): Promise
 }
 
 export async function projectToKv(env: Env, auth: StoredAuth, now: number): Promise<void> {
+	if (env.OAUTH_VAULT) {
+		if (!(await vaultPut(env, auth))) throw new Error("oauth vault unavailable");
+		return;
+	}
 	if (!env.KV) return;
 	await env.KV.put(AUTH_TOKENS_KEY, JSON.stringify(auth.tokens));
 	await env.KV.put(AUTH_LAST_REFRESH_KEY, auth.lastRefresh || new Date(now).toISOString());
