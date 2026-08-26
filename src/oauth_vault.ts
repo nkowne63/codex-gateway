@@ -16,11 +16,12 @@ async function seal(env: Env, value: VaultRecord): Promise<string> {
 	const output = new Uint8Array(iv.length + ciphertext.length);
 	output.set(iv);
 	output.set(ciphertext, iv.length);
-	return btoa(String.fromCharCode(...output));
+	return `v1:${btoa(String.fromCharCode(...output))}`;
 }
 
 async function open(env: Env, encoded: string): Promise<VaultRecord> {
-	const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+	if (!encoded.startsWith("v1:")) throw new Error("unsupported vault record version");
+	const bytes = Uint8Array.from(atob(encoded.slice(3)), (c) => c.charCodeAt(0));
 	const value = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(0, 12) }, await keyFrom(env), bytes.slice(12));
 	return JSON.parse(new TextDecoder().decode(value)) as VaultRecord;
 }

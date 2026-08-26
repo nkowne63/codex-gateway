@@ -12,8 +12,8 @@ kv_namespaces = [
 # Production inference provider. The API key is a Worker secret, never committed.
 OPENAI_PROVIDER = "chatgpt-oauth"
 OPENAI_DEFAULT_MODEL = "gpt-5.6-luna"
-# Route inference through the private WSL codex-origin service. The companion
-# CODEX_PRIVATE_ORIGIN_TOKEN remains a Worker secret and is never committed.
+# Route inference through the private RPi fixed proxy service. Replace the
+# temporary service ID after Terraform creates the real RPi service.
 UPSTREAM_MODE = "private-origin"
 
 # Cloudflare Access JWT verification (set as Worker vars; no secrets in git).
@@ -58,4 +58,6 @@ enabled = true
 
 [[vpc_services]]
 binding = "CODEX_PRIVATE_ORIGIN"
+# Temporary WSL service; replace only this ID with the Terraform-created RPi
+# fixed-proxy service ID when homelab-os applies the Connectivity Directory resource.
 service_id = "01a0395c-f20e-7451-a8d6-30d3654805ca"

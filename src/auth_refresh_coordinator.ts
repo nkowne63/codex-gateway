@@ -21,8 +21,14 @@ export class AuthRefreshCoordinator {
 		if (this.env.GATEWAY_BEARER_TOKEN && request.headers.get("X-Internal-Auth") !== this.env.GATEWAY_BEARER_TOKEN)
 			return new Response("Forbidden", { status: 403 });
 		const input = (await request.json()) as RefreshCoordinationRequest;
-		const record = await this.coordinate(input);
-		return Response.json({ ...record, ...record.auth, ...record.auth.tokens });
+		try {
+			const record = await this.coordinate(input);
+			return Response.json({ ...record, ...record.auth, ...record.auth.tokens });
+		} catch (error) {
+			if (error instanceof Error && error.message === "reauthorization_required")
+				return Response.json({ error: "reauthorization_required" }, { status: 401 });
+			throw error;
+		}
 	}
 
 	private async coordinate(input: RefreshCoordinationRequest): Promise<DurableCredential> {
@@ -44,7 +50,13 @@ export class AuthRefreshCoordinator {
 			if (input.operation === "get" || (!input.force && !needsRefresh(current.auth, input.now))) return current;
 			const generation = current.generation;
 			const account = current.auth.tokens.account_id ? `account:${current.auth.tokens.account_id}` : "account:unknown";
-			const updated = await requestRefresh(this.env, current.auth, input.now, account);
+			let updated: Awaited<ReturnType<typeof requestRefresh>>;
+			try {
+				updated = await requestRefresh(this.env, current.auth, input.now, account);
+			} catch (error) {
+				if (error instanceof Error && error.message === "reauthorization_required") throw error;
+				return current;
+			}
 			if (!updated) return current;
 			const latest = await this.state.storage.get<DurableCredential>(CREDENTIAL_KEY);
 			if (!latest || latest.generation !== generation) return latest || current;
@@ -57,6 +69,9 @@ export class AuthRefreshCoordinator {
 		this.refreshInFlight = inFlight;
 		try {
 			return await promise;
+		} catch (error) {
+			if (error instanceof Error && error.message === "reauthorization_required") throw error;
+			throw error;
 		} finally {
 			if (this.refreshInFlight === inFlight) this.refreshInFlight = null;
 		}

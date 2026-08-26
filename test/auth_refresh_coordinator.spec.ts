@@ -74,6 +74,17 @@ describe("AuthRefreshCoordinator", () => {
 		expect(await response.text()).not.toContain("secret");
 	});
 
+	it("classifies invalid_grant as reauthorization_required", async () => {
+		const storage = createStorage();
+		storage.values.set("credential", { generation: 1, fingerprint: "old", auth: { tokens: { access_token: "old", refresh_token: "refresh" }, lastRefresh: new Date(0).toISOString(), expiresAt: null } });
+		const state = { storage, blockConcurrencyWhile: vi.fn(async (operation: () => Promise<unknown>) => operation()) } as unknown as DurableObjectState;
+		vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 })));
+		const coordinator = new AuthRefreshCoordinator(state, { CHATGPT_LOCAL_CLIENT_ID: "client-id" } as unknown as Env);
+		const response = await coordinator.fetch(new Request("https://internal/refresh", { method: "POST", body: JSON.stringify({ operation: "refresh", now: Date.now(), force: true, source: { tokens: { access_token: "old", refresh_token: "refresh" }, lastRefresh: new Date(0).toISOString(), expiresAt: null } }) }));
+		expect(response.status).toBe(401);
+		expect(await response.json()).toMatchObject({ error: "reauthorization_required" });
+	});
+
 	it("queues a forced refresh behind a weak read and returns the refreshed token", async () => {
 		const storage = createStorage();
 		const oldAuth = {

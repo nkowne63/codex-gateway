@@ -104,6 +104,7 @@ export async function loadBootstrap(env: Env, now: number, seed = true): Promise
 		} catch {
 			return null;
 		}
+		return null;
 	}
 	if (env.KV) {
 		try {
@@ -173,13 +174,19 @@ export async function requestRefresh(
 		refresh_token: source.tokens.refresh_token,
 		scope: "openid profile email"
 	};
-	try {
+	for (let attempt = 0; attempt < 3; attempt += 1) try {
 		const response = await fetch("https://auth.openai.com/oauth/token", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(body)
 		});
 		if (!response.ok) {
+			let errorCode = "";
+			try { errorCode = String((await response.clone().json() as { error?: unknown }).error || ""); } catch {}
+			if (errorCode === "invalid_grant") throw new Error("reauthorization_required");
+			if (response.status >= 500 || response.status === 429) {
+				if (attempt < 2) { await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt)); continue; }
+			}
 			logRefresh(accountKey, "oauth_http", response.status);
 			return null;
 		}
@@ -219,10 +226,13 @@ export async function requestRefresh(
 								account_id: returnedTokens.account_id
 						  })
 		};
-	} catch {
+	} catch (error) {
+		if (error instanceof Error && error.message === "reauthorization_required") throw error;
+		if (attempt < 2) { await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt)); continue; }
 		logRefresh(accountKey, "network");
 		return null;
 	}
+	return null;
 }
 
 function codex(record: DurableCredential | null): CodexAuth {

@@ -27,4 +27,13 @@ describe("OAuthVault", () => {
 		const get = await vault.fetch(new Request("https://vault"));
 		expect(await get.json()).toEqual({ found: true, value: credential });
 	});
+
+	it("stores a versioned encrypted record", async () => {
+		const runtime = state();
+		const env = { OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(8))) } as Env;
+		const vault = new OAuthVault(runtime, env);
+		await vault.fetch(new Request("https://vault", { method: "PUT", body: JSON.stringify({ tokens: { access_token: "a" }, lastRefresh: null, expiresAt: null }) }));
+		const stored = await runtime.storage.get<string>("credential");
+		expect(stored).toMatch(/^v1:/);
+	});
 });

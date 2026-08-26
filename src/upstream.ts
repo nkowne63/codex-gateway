@@ -42,7 +42,7 @@ export async function startUpstreamRequest(
 ): Promise<{ response: Response | null; error: Response | null; alreadySse?: boolean }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
 	const privateOriginMode = env.UPSTREAM_MODE === "private-origin";
-	if (privateOriginMode && (!env.CODEX_PRIVATE_ORIGIN || !env.CODEX_PRIVATE_ORIGIN_TOKEN)) {
+	if (privateOriginMode && (!env.CODEX_PRIVATE_ORIGIN || (env.OPENAI_PROVIDER === "chatgpt-oauth" && (!env.OAUTH_VAULT || !env.OAUTH_VAULT_KEY)))) {
 		return {
 			response: null,
 			error: new Response(JSON.stringify({ error: { message: "Private origin is not configured" } }), {
@@ -147,7 +147,6 @@ export async function startUpstreamRequest(
 	if (privateOriginMode) {
 		return startPrivateOriginRequest(
 			env.CODEX_PRIVATE_ORIGIN!,
-			env.CODEX_PRIVATE_ORIGIN_TOKEN!,
 			requestBody,
 			oauthAuth?.accessToken || null,
 			oauthAuth?.accountId || null,
@@ -228,7 +227,6 @@ export async function startUpstreamRequest(
 
 async function startPrivateOriginRequest(
 	origin: Fetcher,
-	token: string,
 	requestBody: string,
 	chatGptToken: string | null,
 	accountId: string | null,
@@ -239,7 +237,6 @@ async function startPrivateOriginRequest(
 			method: "POST",
 			headers: {
 				...(chatGptToken ? { Authorization: `Bearer ${chatGptToken}` } : {}),
-				"X-Private-Origin-Authorization": `Bearer ${token}`,
 				...(accountId ? { "ChatGPT-Account-ID": accountId } : {}),
 				"Content-Type": "application/json",
 				Accept: requestBody.includes('"stream":true') ? "text/event-stream" : "application/json"

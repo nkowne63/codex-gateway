@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOAuthLoginApp, OAUTH_CALLBACK_URI } from "../src/oauth_login";
+import { AuthStore } from "../src/auth_store";
+import { startUpstreamRequest } from "../src/upstream";
 import type { Env } from "../src/types";
 
 function createKv(initial: Record<string, string> = {}) {
@@ -51,6 +53,29 @@ const auth = "Bearer gateway-secret";
 afterEach(() => vi.restoreAllMocks());
 
 describe("OAuth login routes", () => {
+	it("saves callback credentials, refreshes them, and injects the rotated token at the private origin", async () => {
+		let credential: unknown;
+		const vault = { idFromName: () => "default", get: () => ({ fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === "PUT") { credential = JSON.parse(String(init.body)); return new Response(null, { status: 204 }); }
+			return Response.json({ found: Boolean(credential), value: credential });
+		}) }) };
+		const oauth = coordinator();
+		const exchange = vi.fn(async () => new Response(JSON.stringify({ access_token: "callback-access", refresh_token: "callback-refresh", expires_in: 3600 })));
+		const app = createOAuthLoginApp({ fetch: exchange, now: () => 20_000, random: () => new Uint8Array(32).fill(6) });
+		const runtimeEnv = { ...env(createKv()), OAUTH_LOGIN_COORDINATOR: oauth, OAUTH_VAULT: vault } as unknown as Env;
+		const login = await app.request("/oauth/login/url", { headers: { Authorization: auth } }, runtimeEnv);
+		const state = new URL((await login.json<{ authorization_url: string }>()).authorization_url).searchParams.get("state")!;
+		await app.request("/oauth/callback", { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ callback_url: `${OAUTH_CALLBACK_URI}?code=c&state=${state}` }) }, runtimeEnv);
+		vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ access_token: "rotated-access", refresh_token: "rotated-refresh", expires_in: 3600 }))));
+		const refreshed = await AuthStore.refresh(runtimeEnv, Date.now());
+		expect(refreshed.accessToken).toBe("rotated-access");
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer rotated-access");
+			return new Response("data: {}\n\n", { status: 200, headers: { "Content-Type": "text/event-stream" } });
+		});
+		const result = await startUpstreamRequest({ ...runtimeEnv, OPENAI_PROVIDER: "chatgpt-oauth", UPSTREAM_MODE: "private-origin", CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin }, OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))) } as Env, "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ input: "hello", stream: true }) });
+		expect(result.error).toBeNull();
+	});
 	it("rejects login start without the gateway bearer token", async () => {
 		const app = createOAuthLoginApp({ now: () => 1_000 });
 		const response = await app.request("/oauth/login/url", {}, env(createKv()));
