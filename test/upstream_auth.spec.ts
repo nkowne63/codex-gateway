@@ -122,6 +122,32 @@ describe("OpenAI API upstream provider", () => {
 		});
 	});
 
+	it("forwards only safe Responses function tools to the private origin", async () => {
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			expect(body.tools).toEqual([{ type: "function", name: "execCode", description: "Run an authorized workspace command", parameters: { type: "object", properties: { code: { type: "string" } }, additionalProperties: false }, strict: true }]);
+			expect(body.tools[0]).not.toHaveProperty("function");
+			expect(body).not.toHaveProperty("tool_choice");
+			expect(body).not.toHaveProperty("metadata");
+			return new Response('data: {"type":"response.completed","response":{}}\n\n', { status: 200, headers: { "Content-Type": "text/event-stream" } });
+		});
+		await startUpstreamRequest(env({ UPSTREAM_MODE: "private-origin", CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"] }), "gpt-5.6-luna", [], {
+			rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", tools: [{ type: "function", name: "execCode", description: "Run an authorized workspace command", parameters: { type: "object", properties: { code: { type: "string" } }, additionalProperties: false }, strict: true }], metadata: { dangerous: "drop" } })
+		});
+	});
+
+	it("forwards safe Responses tool selection controls but drops unknown fields", async () => {
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			expect(body.tool_choice).toEqual({ type: "function", name: "execCode" });
+			expect(body.parallel_tool_calls).toBe(false);
+			return new Response('data: {"type":"response.completed","response":{}}\n\n', { status: 200, headers: { "Content-Type": "text/event-stream" } });
+		});
+		await startUpstreamRequest(env({ UPSTREAM_MODE: "private-origin", CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"] }), "gpt-5.6-luna", [], {
+			rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", tool_choice: { type: "function", name: "execCode", extra: "drop" }, parallel_tool_calls: false, tools: [] })
+		});
+	});
+
 	it("forwards sanitized reasoning effort while dropping other Responses fields", async () => {
 		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
 			const body = JSON.parse(String(init?.body));

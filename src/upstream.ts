@@ -32,6 +32,27 @@ function normalizeResponsesPayloadInput(payload: Record<string, unknown>): Recor
 	};
 }
 
+function safePrivateOriginTools(value: unknown): Array<Record<string, unknown>> {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((tool) => {
+		if (!tool || typeof tool !== "object" || Array.isArray(tool)) return [];
+		const candidate = tool as Record<string, unknown>;
+		if (candidate.type !== "function" || typeof candidate.name !== "string" || !candidate.name.trim()) return [];
+		const safe: Record<string, unknown> = { type: "function", name: candidate.name };
+		if (typeof candidate.description === "string") safe.description = candidate.description;
+		if (candidate.parameters && typeof candidate.parameters === "object" && !Array.isArray(candidate.parameters)) safe.parameters = candidate.parameters;
+		if (typeof candidate.strict === "boolean") safe.strict = candidate.strict;
+		return [safe];
+	});
+}
+
+function safePrivateOriginToolChoice(value: unknown): unknown {
+	if (value === "auto" || value === "none" || value === "required") return value;
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const choice = value as Record<string, unknown>;
+	return choice.type === "function" && typeof choice.name === "string" && choice.name.trim() ? { type: "function", name: choice.name } : undefined;
+}
+
 function normalizePrivateOriginPayload(payload: Record<string, unknown>, defaultReasoning?: ReasoningParam): Record<string, unknown> {
 	const validEfforts = new Set(["none", "low", "medium", "high", "xhigh", "max"]);
 	const rawReasoning = payload.reasoning;
@@ -46,6 +67,9 @@ function normalizePrivateOriginPayload(payload: Record<string, unknown>, default
 		input: normalizeResponsesPayloadInput(payload).input,
 		stream: true,
 		store: false,
+		...(safePrivateOriginTools(payload.tools).length ? { tools: safePrivateOriginTools(payload.tools) } : {}),
+		...(safePrivateOriginToolChoice(payload.tool_choice) !== undefined ? { tool_choice: safePrivateOriginToolChoice(payload.tool_choice) } : {}),
+		...(typeof payload.parallel_tool_calls === "boolean" ? { parallel_tool_calls: payload.parallel_tool_calls } : {}),
 		...(effort ? { reasoning: { effort } } : {})
 	};
 }

@@ -134,6 +134,31 @@ describe("Responses endpoint", () => {
 		});
 	});
 
+	it("keeps Responses function-call events in a streamed Workshop response", async () => {
+		startUpstreamRequest.mockResolvedValueOnce({
+			response: new Response(
+				'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_exec","name":"execCode","arguments":"{\\"code\\":\\"pwd\\"}"}}\n\n' +
+				'data: {"type":"response.completed","response":{"id":"resp_tool","status":"completed","output":[{"type":"function_call","call_id":"call_exec","name":"execCode","arguments":"{\\"code\\":\\"pwd\\"}"}]}}\n\n',
+				{ headers: { "Content-Type": "text/event-stream" } }
+			),
+			error: null,
+			alreadySse: true
+		});
+		const response = await responses.fetch(
+			new Request("https://gateway.test/v1/responses", {
+				method: "POST",
+				headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+				body: JSON.stringify({ model: "gpt-5.6-luna", input: "run it", stream: true, tools: [{ type: "function", name: "execCode", parameters: { type: "object" } }] })
+			}),
+			env
+		);
+		expect(response.status).toBe(200);
+		const body = await response.text();
+		expect(body).toContain('"type":"response.output_item.done"');
+		expect(body).toContain('"name":"execCode"');
+		expect(body).toContain('"call_id":"call_exec"');
+	});
+
 	it("aggregates an origin SSE terminal event using standard event framing", async () => {
 		startUpstreamRequest.mockResolvedValueOnce({
 			response: new Response(
