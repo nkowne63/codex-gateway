@@ -55,7 +55,11 @@ describe("OpenAI API upstream provider", () => {
 		expect(headers.get("Authorization")).toBeNull();
 		expect(headers.get("X-Private-Origin-Authorization")).toBeNull();
 		expect(headers.get("X-Gateway-Authorization")).toBeNull();
-		expect(JSON.parse(String(init?.body))).toEqual({ ...payload, model: "gpt-5.6-luna" });
+		expect(JSON.parse(String(init?.body))).toEqual({
+			...payload,
+			model: "gpt-5.6-luna",
+			input: [{ type: "message", role: "user", content: "hello" }]
+		});
 		expect(result.error).toBeNull();
 		expect(await result.response?.text()).toContain("gpt-5.6-luna");
 	});
@@ -342,7 +346,11 @@ describe("OpenAI API upstream provider", () => {
 			{ rawResponsesBody: JSON.stringify(body) }
 		);
 		const [, init] = upstream.mock.calls.find(([url]) => url === "https://chatgpt.com/backend-api/codex/responses")!;
-		expect(JSON.parse(String(init?.body))).toEqual({ ...body, model: "gpt-5.6-luna" });
+		expect(JSON.parse(String(init?.body))).toEqual({
+			...body,
+			model: "gpt-5.6-luna",
+			input: [{ type: "message", role: "user", content: "hello" }]
+		});
 	});
 
 	it("fails closed with 503 when the provider key is missing", async () => {

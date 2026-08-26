@@ -24,6 +24,14 @@ function logUpstreamError(status: number | "fetch-failed", requestUrl: string, m
 	console.error(`Upstream request failed status=${status} url=${safeUpstreamLocation(requestUrl)} ${metadata}`);
 }
 
+function normalizeResponsesPayloadInput(payload: Record<string, unknown>): Record<string, unknown> {
+	if (typeof payload.input !== "string") return payload;
+	return {
+		...payload,
+		input: [{ type: "message", role: "user", content: payload.input }]
+	};
+}
+
 export async function startUpstreamRequest(
 	env: Env, // Pass the environment object
 	model: string,
@@ -101,7 +109,7 @@ export async function startUpstreamRequest(
 		options?.rawResponsesBody !== undefined
 			? (() => {
 					try {
-						const parsed = JSON.parse(options.rawResponsesBody) as Record<string, unknown>;
+						const parsed = normalizeResponsesPayloadInput(JSON.parse(options.rawResponsesBody) as Record<string, unknown>);
 						return JSON.stringify({
 							...parsed,
 							model: normalizeModelName(typeof parsed.model === "string" ? parsed.model : model, env.DEBUG_MODEL, model)
