@@ -32,6 +32,14 @@ function normalizeResponsesPayloadInput(payload: Record<string, unknown>): Recor
 	};
 }
 
+function normalizePrivateOriginPayload(payload: Record<string, unknown>): Record<string, unknown> {
+	return {
+		...normalizeResponsesPayloadInput(payload),
+		stream: true,
+		store: false
+	};
+}
+
 export async function startUpstreamRequest(
 	env: Env, // Pass the environment object
 	model: string,
@@ -109,7 +117,9 @@ export async function startUpstreamRequest(
 		options?.rawResponsesBody !== undefined
 			? (() => {
 					try {
-						const parsed = normalizeResponsesPayloadInput(JSON.parse(options.rawResponsesBody) as Record<string, unknown>);
+						const parsed = (privateOriginMode
+							? normalizePrivateOriginPayload
+							: normalizeResponsesPayloadInput)(JSON.parse(options.rawResponsesBody) as Record<string, unknown>);
 						return JSON.stringify({
 							...parsed,
 							model: normalizeModelName(typeof parsed.model === "string" ? parsed.model : model, env.DEBUG_MODEL, model)
@@ -120,7 +130,7 @@ export async function startUpstreamRequest(
 				})()
 			: responsesPayload
 				? JSON.stringify({
-						...structuredClone(responsesPayload),
+						...(privateOriginMode ? normalizePrivateOriginPayload(structuredClone(responsesPayload)) : structuredClone(responsesPayload)),
 						model: normalizeModelName(model, env.DEBUG_MODEL),
 						stream: true,
 						prompt_cache_key: sessionId,
