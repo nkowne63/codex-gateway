@@ -56,7 +56,7 @@ describe("OAuth login routes", () => {
 	it("accepts protected bootstrap credentials and returns no credential data", async () => {
 		let stored = "";
 		const vault = { idFromName: () => "default", get: () => ({ fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => { if (init?.method === "PUT") stored = String(init.body); return new Response(JSON.stringify({ ok: true })); }) }) };
-		const runtimeEnv = { ...env(createKv()), OAUTH_VAULT: vault, OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))) } as unknown as Env;
+		const runtimeEnv = { ...env(createKv()), OAUTH_BOOTSTRAP_ENABLED: "true", OAUTH_VAULT: vault, OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))) } as unknown as Env;
 		const response = await createOAuthLoginApp().request("/oauth/bootstrap", { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ auth: { tokens: { access_token: "a", refresh_token: "r", account_id: "acct" } } }) }, runtimeEnv);
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ status: "ok" });

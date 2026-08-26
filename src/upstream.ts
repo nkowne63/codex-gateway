@@ -170,7 +170,7 @@ export async function startUpstreamRequest(
 			: JSON.parse(requestBody).stream === true
 				? "text/event-stream"
 				: "application/json";
-	} catch {
+	} catch (error) {
 		headers["Accept"] = isChatGptOAuth ? "text/event-stream" : "application/json";
 	}
 	if (isChatGptOAuth) headers["OpenAI-Beta"] = "responses=2026-02-06";
@@ -233,7 +233,7 @@ async function startPrivateOriginRequest(
 	signal?: AbortSignal
 ): Promise<{ response: Response | null; error: Response | null; alreadySse?: boolean }> {
 	try {
-		const upstreamResponse = await origin.fetch("https://codex-private-origin/v1/responses", {
+		const upstreamResponse = await origin.fetch("http://127.0.0.1/v1/responses", {
 			method: "POST",
 			headers: {
 				...(chatGptToken ? { Authorization: `Bearer ${chatGptToken}` } : {}),

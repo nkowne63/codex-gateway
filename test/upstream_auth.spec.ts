@@ -49,7 +49,7 @@ describe("OpenAI API upstream provider", () => {
 			{ rawResponsesBody: JSON.stringify(payload) }
 		);
 		const [input, init] = privateOrigin.mock.calls[0];
-		expect(String(input)).toBe("https://codex-private-origin/v1/responses");
+		expect(String(input)).toBe("http://127.0.0.1/v1/responses");
 		expect(init?.method).toBe("POST");
 		const headers = new Headers(init?.headers);
 		expect(headers.get("Authorization")).toBeNull();

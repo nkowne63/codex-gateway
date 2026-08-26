@@ -16,6 +16,7 @@ export interface Env {
 	OAUTH_LOGIN_COORDINATOR?: DurableObjectNamespace;
 	OAUTH_VAULT?: DurableObjectNamespace;
 	OAUTH_VAULT_KEY?: string;
+	OAUTH_BOOTSTRAP_ENABLED?: "true" | "false";
 	GATEWAY_BEARER_TOKEN: string;
 	ACCESS_SERVICE_TOKEN_CLIENT_ID?: string;
 	ACCESS_SERVICE_TOKEN_CLIENT_SECRET?: string;

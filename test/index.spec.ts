@@ -48,6 +48,20 @@ describe("OAuth integration routes", () => {
 		expect(response.status).toBe(410);
 	});
 
+	it("allows only the explicitly enabled empty-vault bootstrap route", async () => {
+		const response = await worker.fetch(new Request("https://example.com/oauth/bootstrap", {
+			method: "POST",
+			headers: { Authorization: "Bearer gateway-secret", "Content-Type": "application/json" },
+			body: JSON.stringify({ auth: { tokens: { access_token: "a" } } })
+		}), {
+			...bindings,
+			OAUTH_BOOTSTRAP_ENABLED: "true",
+			OAUTH_VAULT: { idFromName: () => "default", get: () => ({ fetch: async () => Response.json({ found: false }) }) },
+			OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32)))
+		} as typeof env, createExecutionContext());
+		expect(response.status).not.toBe(410);
+	});
+
 	it("uses the gateway token for API authentication, not the OAuth client secret", async () => {
 		const request = new Request("https://example.com/v1/models", {
 			headers: { Authorization: "Bearer client-secret" }

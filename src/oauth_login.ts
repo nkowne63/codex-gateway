@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { projectToKv } from "./auth_store";
+import { vaultGet } from "./oauth_vault";
 import type { Env, TokenData } from "./types";
 
 export const OAUTH_CALLBACK_URI = "http://localhost:1455/auth/callback";
@@ -168,7 +169,9 @@ export function createOAuthLoginApp(options: OAuthLoginOptions = {}) {
 
 	app.post("/oauth/bootstrap", async (c) => {
 		if (!(await authorized(c, options))) return c.json({ error: "unauthorized" }, 401);
+		if (c.env.OAUTH_BOOTSTRAP_ENABLED !== "true") return c.json({ error: "oauth_disabled" }, 410);
 		if (!c.env.OAUTH_VAULT || !c.env.OAUTH_VAULT_KEY) return c.json({ error: "oauth_unavailable" }, 503);
+		if (await vaultGet(c.env)) return c.json({ error: "bootstrap_already_complete" }, 409);
 		let input: any;
 		try { input = await c.req.json(); } catch { return c.json({ error: "invalid_request" }, 400); }
 		const tokens = input?.auth?.tokens;

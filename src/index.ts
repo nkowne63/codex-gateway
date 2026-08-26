@@ -41,7 +41,10 @@ app.get("/", (c) => c.json({ status: "ok" }));
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
-app.use("/oauth/*", async (c) => c.json({ error: "oauth_disabled" }, 410));
+app.use("/oauth/*", async (c, next) => {
+	if (c.req.path === "/oauth/bootstrap" && c.env.OAUTH_BOOTSTRAP_ENABLED === "true") return next();
+	return c.json({ error: "oauth_disabled" }, 410);
+});
 
 app.route("/oauth/login", createOAuthLoginPage({ callbackEndpoint: "/oauth/callback" }));
 app.route("/", createOAuthLoginApp());
