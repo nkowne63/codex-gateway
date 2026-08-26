@@ -118,7 +118,7 @@ responses.post("/v1/responses", openaiAuthMiddleware(), async (c) => {
 		toolChoice: payload.tool_choice as "auto" | "none" | "required" | { type: string; function: { name: string } },
 		parallelToolCalls: Boolean(payload.parallel_tool_calls),
 		reasoningParam: buildReasoningParam(
-			c.env.REASONING_EFFORT || "minimal",
+			c.env.REASONING_EFFORT || "medium",
 			c.env.REASONING_SUMMARY || "auto",
 			reasoning
 		),

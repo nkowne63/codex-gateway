@@ -29,6 +29,18 @@ function websocketFixture() {
 }
 
 describe("OpenAI API upstream provider", () => {
+	it.each(["none", "low", "medium", "high", "xhigh", "max"])("forwards reasoning effort %s to the private origin", async (effort) => {
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			expect(body.model).toBe("gpt-5.6-luna");
+			expect(body.reasoning).toEqual({ effort });
+			return new Response('data: {"type":"response.completed"}\n\n', { status: 200, headers: { "Content-Type": "text/event-stream" } });
+		});
+		await startUpstreamRequest(env({ UPSTREAM_MODE: "private-origin", CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"] }), "gpt-5.6-luna", [], {
+			rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", reasoning: { effort }, stream: false })
+		});
+	});
+
 	const vault = () => ({ idFromName: () => "default", get: () => ({ fetch: async () => Response.json({ found: true, value: { tokens: { access_token: "oauth-token", account_id: "acct-redacted" }, lastRefresh: new Date().toISOString(), expiresAt: null } }) }) });
 	it("forwards normalized Responses JSON to the private origin without forwarding the gateway token", async () => {
 		const privateOrigin = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
@@ -107,6 +119,46 @@ describe("OpenAI API upstream provider", () => {
 			CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"]
 		}), "gpt-5.6-luna", [], {
 			rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", instructions: "extra", tools: [], prompt_cache_key: "extra", stream: false })
+		});
+	});
+
+	it("forwards sanitized reasoning effort while dropping other Responses fields", async () => {
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			expect(body).toEqual({
+				model: "gpt-5.6-luna",
+				input: [{ type: "message", role: "user", content: "hello" }],
+				stream: true,
+				store: false,
+				reasoning: { effort: "high" }
+			});
+			return new Response('data: {"type":"response.completed","response":{"output_text":"OK"}}\n\n', {
+				status: 200,
+				headers: { "Content-Type": "text/event-stream" }
+			});
+		});
+		await startUpstreamRequest(env({
+			UPSTREAM_MODE: "private-origin",
+			CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"]
+		}), "gpt-5.6-luna", [], {
+			reasoningParam: { effort: "high" },
+			rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", reasoning: { effort: "high" }, instructions: "drop", tools: [{ type: "function" }], stream: false, store: true })
+		});
+	});
+
+	it("uses configured reasoning when the request omits it", async () => {
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			expect(body.reasoning).toEqual({ effort: "xhigh" });
+			return new Response('data: {"type":"response.completed","response":{}}\n\n', { status: 200, headers: { "Content-Type": "text/event-stream" } });
+		});
+		await startUpstreamRequest(env({
+			UPSTREAM_MODE: "private-origin",
+			REASONING_EFFORT: "xhigh" as Env["REASONING_EFFORT"],
+			CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"]
+		}), "gpt-5.6-luna", [], {
+			reasoningParam: { effort: "xhigh" },
+			rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello" })
 		});
 	});
 

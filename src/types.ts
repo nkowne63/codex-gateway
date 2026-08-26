@@ -1,5 +1,5 @@
 // Strict type definitions for environment variables
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ReasoningSummary = "auto" | "on" | "off";
 export type ReasoningCompat = "think-tags" | "standard";
 export type VerboseMode = "true" | "false";

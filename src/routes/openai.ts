@@ -13,7 +13,7 @@ const openai = new Hono<{ Bindings: Env }>();
 
 openai.post("/v1/chat/completions", openaiAuthMiddleware(), async (c) => {
 	const verbose = c.env.VERBOSE === "true";
-	let reasoningEffort = c.env.REASONING_EFFORT || "minimal";
+	let reasoningEffort = c.env.REASONING_EFFORT || "medium";
 	const reasoningSummary = c.env.REASONING_SUMMARY || "auto";
 	const reasoningCompat = c.env.REASONING_COMPAT || "think-tags";
 	const debugModel = c.env.DEBUG_MODEL;
@@ -247,7 +247,7 @@ openai.post("/v1/chat/completions", openaiAuthMiddleware(), async (c) => {
 openai.post("/v1/completions", openaiAuthMiddleware(), async (c) => {
 	const verbose = c.env.VERBOSE === "true";
 	const debugModel = c.env.DEBUG_MODEL;
-	const reasoningEffort = c.env.REASONING_EFFORT || "minimal";
+	const reasoningEffort = c.env.REASONING_EFFORT || "medium";
 	const reasoningSummary = c.env.REASONING_SUMMARY || "auto";
 
 	// Minimal request logging

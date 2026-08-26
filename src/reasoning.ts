@@ -4,14 +4,14 @@ type ReasoningParam = {
 };
 
 export function buildReasoningParam(
-	baseEffort: string = "minimal",
+	baseEffort: string = "medium",
 	baseSummary: string = "auto",
 	overrides?: { effort?: string; summary?: string }
 ): ReasoningParam {
 	let effort = (baseEffort || "").trim().toLowerCase();
 	let summary = (baseSummary || "").trim().toLowerCase();
 
-	const validEfforts = new Set(["low", "medium", "high", "none", "minimal"]);
+	const validEfforts = new Set(["low", "medium", "high", "none", "minimal", "xhigh", "max"]);
 	const validSummaries = new Set(["auto", "concise", "detailed", "none"]);
 
 	if (overrides) {
@@ -25,9 +25,8 @@ export function buildReasoningParam(
 		}
 	}
 
-	if (!validEfforts.has(effort)) {
-		effort = "minimal";
-	}
+	if (effort === "minimal") effort = "low";
+	if (!validEfforts.has(effort)) effort = "medium";
 	if (!validSummaries.has(summary)) {
 		summary = "auto";
 	}

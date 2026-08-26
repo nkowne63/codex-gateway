@@ -32,12 +32,21 @@ function normalizeResponsesPayloadInput(payload: Record<string, unknown>): Recor
 	};
 }
 
-function normalizePrivateOriginPayload(payload: Record<string, unknown>): Record<string, unknown> {
+function normalizePrivateOriginPayload(payload: Record<string, unknown>, defaultReasoning?: ReasoningParam): Record<string, unknown> {
+	const validEfforts = new Set(["none", "low", "medium", "high", "xhigh", "max"]);
+	const rawReasoning = payload.reasoning;
+	const requestedEffort =
+		typeof rawReasoning === "object" && rawReasoning !== null && typeof (rawReasoning as { effort?: unknown }).effort === "string"
+			? (rawReasoning as { effort: string }).effort.trim().toLowerCase()
+			: defaultReasoning?.effort;
+	const normalizedEffort = requestedEffort === "minimal" ? "low" : requestedEffort;
+	const effort = normalizedEffort && validEfforts.has(normalizedEffort) ? normalizedEffort : undefined;
 	return {
 		model: payload.model,
 		input: normalizeResponsesPayloadInput(payload).input,
 		stream: true,
-		store: false
+		store: false,
+		...(effort ? { reasoning: { effort } } : {})
 	};
 }
 
@@ -119,7 +128,7 @@ export async function startUpstreamRequest(
 			? (() => {
 					try {
 						const parsed = (privateOriginMode
-							? normalizePrivateOriginPayload
+							? (payload: Record<string, unknown>) => normalizePrivateOriginPayload(payload, reasoningParam)
 							: normalizeResponsesPayloadInput)(JSON.parse(options.rawResponsesBody) as Record<string, unknown>);
 						return JSON.stringify({
 							...parsed,
@@ -131,7 +140,7 @@ export async function startUpstreamRequest(
 				})()
 			: responsesPayload
 				? JSON.stringify({
-						...(privateOriginMode ? normalizePrivateOriginPayload(structuredClone(responsesPayload)) : structuredClone(responsesPayload)),
+						...(privateOriginMode ? normalizePrivateOriginPayload(structuredClone(responsesPayload), reasoningParam) : structuredClone(responsesPayload)),
 						model: normalizeModelName(model, env.DEBUG_MODEL),
 						stream: true,
 						prompt_cache_key: sessionId,
