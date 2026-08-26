@@ -148,6 +148,38 @@ describe("OpenAI API upstream provider", () => {
 		});
 	});
 
+	it("strips tools with invalid names, descriptions, or parameter schemas", async () => {
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			expect(body.tools).toEqual([{ type: "function", name: "executeCode", description: "valid", parameters: { type: "object", properties: { code: { type: "string" } } } }]);
+			return new Response('data: {"type":"response.completed"}\n\n', { status: 200, headers: { "Content-Type": "text/event-stream" } });
+		});
+		await startUpstreamRequest(env({ UPSTREAM_MODE: "private-origin", CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"] }), "gpt-5.6-luna", [], {
+			rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", tools: [
+				{ type: "function", name: "executeCode", description: "valid", parameters: { type: "object", properties: { code: { type: "string" } } } },
+				{ type: "function", name: " bad", parameters: { type: "object", properties: {} } },
+				{ type: "function", name: "bad\nname", parameters: { type: "object", properties: {} } },
+				{ type: "function", name: "x".repeat(65), parameters: { type: "object", properties: {} } },
+				{ type: "function", name: "badParams", parameters: { properties: {} } },
+				{ type: "function", name: "badRequired", parameters: { type: "object", properties: { code: { type: "string" } }, required: ["code", "code"] } },
+				{ type: "function", name: "badDescription", description: 42, parameters: { type: "object", properties: {} } },
+				{ type: "function", name: "controlDescription", description: "ok\u0001", parameters: { type: "object", properties: {} } },
+				{ type: "function", name: "longDescription", description: "x".repeat(1025), parameters: { type: "object", properties: {} } }
+			] })
+		});
+	});
+
+	it("drops a named tool choice when its tool was sanitized out", async () => {
+		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			expect(body.tool_choice).toBeUndefined();
+			return new Response('data: {"type":"response.completed"}\n\n', { status: 200, headers: { "Content-Type": "text/event-stream" } });
+		});
+		await startUpstreamRequest(env({ UPSTREAM_MODE: "private-origin", CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"] }), "gpt-5.6-luna", [], {
+			rawResponsesBody: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", tools: [{ type: "function", name: "executeCode", parameters: { type: "object", properties: {} } }], tool_choice: { type: "function", name: "missing" } })
+		});
+	});
+
 	it("forwards sanitized reasoning effort while dropping other Responses fields", async () => {
 		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
 			const body = JSON.parse(String(init?.body));

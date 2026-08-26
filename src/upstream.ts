@@ -32,15 +32,35 @@ function normalizeResponsesPayloadInput(payload: Record<string, unknown>): Recor
 	};
 }
 
+const PRIVATE_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+const PRIVATE_DESCRIPTION_MAX = 1024;
+
+function validParametersSchema(value: unknown): value is Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const schema = value as Record<string, unknown>;
+	if (schema.type !== "object") return false;
+	if (schema.properties !== undefined && (!schema.properties || typeof schema.properties !== "object" || Array.isArray(schema.properties))) return false;
+	if (schema.required !== undefined) {
+		if (!Array.isArray(schema.required) || schema.required.some((item) => typeof item !== "string") || new Set(schema.required).size !== schema.required.length) return false;
+		const properties = (schema.properties || {}) as Record<string, unknown>;
+		if (schema.required.some((item) => !(item in properties))) return false;
+	}
+	return true;
+}
+
 function safePrivateOriginTools(value: unknown): Array<Record<string, unknown>> {
 	if (!Array.isArray(value)) return [];
 	return value.flatMap((tool) => {
 		if (!tool || typeof tool !== "object" || Array.isArray(tool)) return [];
 		const candidate = tool as Record<string, unknown>;
-		if (candidate.type !== "function" || typeof candidate.name !== "string" || !candidate.name.trim()) return [];
+		if (candidate.type !== "function" || typeof candidate.name !== "string" || !PRIVATE_TOOL_NAME.test(candidate.name)) return [];
 		const safe: Record<string, unknown> = { type: "function", name: candidate.name };
-		if (typeof candidate.description === "string") safe.description = candidate.description;
-		if (candidate.parameters && typeof candidate.parameters === "object" && !Array.isArray(candidate.parameters)) safe.parameters = candidate.parameters;
+		if (candidate.description !== undefined) {
+			if (typeof candidate.description !== "string" || candidate.description.length > PRIVATE_DESCRIPTION_MAX || /[\u0000-\u001f\u007f]/.test(candidate.description)) return [];
+			safe.description = candidate.description;
+		}
+		if (!validParametersSchema(candidate.parameters)) return [];
+		safe.parameters = candidate.parameters;
 		if (typeof candidate.strict === "boolean") safe.strict = candidate.strict;
 		return [safe];
 	});
@@ -56,6 +76,10 @@ function safePrivateOriginToolChoice(value: unknown): unknown {
 function normalizePrivateOriginPayload(payload: Record<string, unknown>, defaultReasoning?: ReasoningParam): Record<string, unknown> {
 	const validEfforts = new Set(["none", "low", "medium", "high", "xhigh", "max"]);
 	const rawReasoning = payload.reasoning;
+	const sanitizedTools = safePrivateOriginTools(payload.tools);
+	const sanitizedToolChoice = safePrivateOriginToolChoice(payload.tool_choice);
+	const validToolNames = new Set(sanitizedTools.map((tool) => tool.name));
+	const usableToolChoice = sanitizedToolChoice && typeof sanitizedToolChoice === "object" && (sanitizedToolChoice as Record<string, unknown>).type === "function" && !validToolNames.has((sanitizedToolChoice as Record<string, unknown>).name) ? undefined : sanitizedToolChoice;
 	const requestedEffort =
 		typeof rawReasoning === "object" && rawReasoning !== null && typeof (rawReasoning as { effort?: unknown }).effort === "string"
 			? (rawReasoning as { effort: string }).effort.trim().toLowerCase()
@@ -67,8 +91,8 @@ function normalizePrivateOriginPayload(payload: Record<string, unknown>, default
 		input: normalizeResponsesPayloadInput(payload).input,
 		stream: true,
 		store: false,
-		...(safePrivateOriginTools(payload.tools).length ? { tools: safePrivateOriginTools(payload.tools) } : {}),
-		...(safePrivateOriginToolChoice(payload.tool_choice) !== undefined ? { tool_choice: safePrivateOriginToolChoice(payload.tool_choice) } : {}),
+		...(sanitizedTools.length ? { tools: sanitizedTools } : {}),
+		...(usableToolChoice !== undefined ? { tool_choice: usableToolChoice } : {}),
 		...(typeof payload.parallel_tool_calls === "boolean" ? { parallel_tool_calls: payload.parallel_tool_calls } : {}),
 		...(effort ? { reasoning: { effort } } : {})
 	};
