@@ -102,6 +102,27 @@ describe("Responses endpoint", () => {
 		});
 	});
 
+	it("aggregates an origin SSE terminal event using standard event framing", async () => {
+		startUpstreamRequest.mockResolvedValueOnce({
+			response: new Response(
+				'event: response.completed\n' +
+					'data: {"id":"resp_origin","status":"completed","output_text":"UI_OK"}\n\n',
+				{ headers: { "Content-Type": "text/event-stream" } }
+			),
+			error: null
+		});
+		const response = await responses.fetch(
+			new Request("https://gateway.test/v1/responses", {
+				method: "POST",
+				headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+				body: JSON.stringify({ model: "gpt-5.6", input: "hello", stream: false })
+			}),
+			env
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({ id: "resp_origin", output_text: "UI_OK" });
+	});
+
 	it("treats omitted stream as non-stream Responses JSON", async () => {
 		startUpstreamRequest.mockResolvedValueOnce({
 			response: new Response(JSON.stringify({ id: "resp_omitted", object: "response", status: "completed" }), {

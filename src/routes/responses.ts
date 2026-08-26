@@ -37,6 +37,7 @@ async function responseJson(upstream: Response, model: string, upstreamIsSse: bo
 	let terminalResponse: Record<string, unknown> | undefined;
 	const decoder = new TextDecoder();
 	let buffer = "";
+	let eventName = "";
 	try {
 		while (true) {
 			const { done, value } = await reader.read();
@@ -48,16 +49,23 @@ async function responseJson(upstream: Response, model: string, upstreamIsSse: bo
 			const lines = buffer.split("\n");
 			buffer = lines.pop() || "";
 			for (const line of lines) {
+				if (line.startsWith("event:")) {
+					eventName = line.slice(6).trim();
+					continue;
+				}
 				if (!line.startsWith("data: ")) continue;
 				try {
 					const event = JSON.parse(line.slice(6));
+					const terminal = event.response && typeof event.response === "object" ? event.response : event;
 					if (
-						/^response\.(completed|incomplete|cancelled|failed)$/.test(event.type) &&
-						event.response &&
-						typeof event.response === "object"
+						(/^response\.(completed|incomplete|cancelled|failed)$/.test(event.type) ||
+							/^response\.(completed|incomplete|cancelled|failed)$/.test(eventName)) &&
+						terminal &&
+						typeof terminal === "object"
 					) {
-						terminalResponse = event.response;
+						terminalResponse = terminal;
 					}
+					eventName = "";
 				} catch {
 					// Ignore malformed upstream events; do not reflect them to clients.
 				}
