@@ -17,10 +17,10 @@ const env = {
 } as Env;
 
 describe("Responses endpoint", () => {
-	it.each(["gpt-5", "gpt-5.6-terra", "arbitrary-alias"])(
+	it.each(["gpt-5", "arbitrary-alias"])(
 		"rejects private-origin model %s before calling the origin",
 		async (model) => {
-			startUpstreamRequest.mockClear();
+			startUpstreamRequest.mockReset();
 			const response = await responses.fetch(
 				new Request("https://gateway.test/v1/responses", {
 					method: "POST",
@@ -32,6 +32,31 @@ describe("Responses endpoint", () => {
 			expect(response.status).toBe(400);
 			expect(await response.json()).toEqual({ error: { message: "Unsupported private-origin model" } });
 			expect(startUpstreamRequest).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"])(
+		"accepts private-origin model %s and forwards it to the origin",
+		async (model) => {
+			startUpstreamRequest.mockReset();
+			startUpstreamRequest.mockResolvedValueOnce({
+				response: new Response(JSON.stringify({ id: "resp", model }), {
+					headers: { "Content-Type": "application/json" }
+				}),
+				error: null
+			});
+			const response = await responses.fetch(
+				new Request("https://gateway.test/v1/responses", {
+					method: "POST",
+					headers: { Authorization: "Bearer client-key", "Content-Type": "application/json" },
+					body: JSON.stringify({ model, input: "hello" })
+				}),
+				{ ...env, UPSTREAM_MODE: "private-origin" } as Env
+			);
+			expect(response.status).toBe(200);
+			expect(startUpstreamRequest).toHaveBeenCalledWith(
+				expect.anything(), model, expect.any(Array), expect.any(Object)
+			);
 		}
 	);
 

@@ -34,5 +34,5 @@ export function isKnownModelId(model: string, env: Env): boolean {
 }
 
 export function isPrivateOriginModel(model: string): boolean {
-	return model === "gpt-5.6-luna" || model === "gpt-5.6-sol";
+	return model === "gpt-5.6-luna" || model === "gpt-5.6-terra" || model === "gpt-5.6-sol";
 }
