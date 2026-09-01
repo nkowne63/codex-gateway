@@ -42,7 +42,13 @@ app.get("/", (c) => c.json({ status: "ok" }));
 app.get("/health", (c) => c.json({ status: "ok" }));
 
 app.use("/oauth/*", async (c, next) => {
-	if (c.req.path === "/oauth/bootstrap" && c.env.OAUTH_BOOTSTRAP_ENABLED === "true") return next();
+	if (c.env.OPENAI_PROVIDER === "chatgpt-oauth") {
+		if (c.req.path === "/oauth/bootstrap") {
+			if (c.env.OAUTH_BOOTSTRAP_ENABLED === "true") return next();
+			return c.json({ error: "oauth_disabled" }, 410);
+		}
+		if (["/oauth/login", "/oauth/login/url", "/oauth/callback"].includes(c.req.path)) return next();
+	}
 	return c.json({ error: "oauth_disabled" }, 410);
 });
 

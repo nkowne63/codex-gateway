@@ -19,6 +19,10 @@ export type RefreshCoordinationRequest = {
 };
 export type DurableCredential = { generation: number; fingerprint: string; auth: StoredAuth };
 
+export function authSource(env: Env): "secret" | "vault" | "fallback" {
+	return env.CODEX_AUTH_SOURCE === "secret" || env.CODEX_AUTH_SOURCE === "vault" ? env.CODEX_AUTH_SOURCE : "fallback";
+}
+
 type InFlightOperation = {
 	operation: AuthOperation;
 	promise: Promise<DurableCredential | null>;
@@ -96,7 +100,19 @@ function fallback(env: Env): StoredAuth | null {
 	}
 }
 
+/** Read the immutable Worker-secret bootstrap credential without selecting it over the vault. */
+export function secretBootstrap(env: Env): StoredAuth | null {
+	return fallback(env);
+}
+
+/** Persist a secret fallback through the same encrypted vault write path used by refresh/callback. */
+export async function persistSecretFallback(env: Env, auth: StoredAuth): Promise<boolean> {
+	if (!env.OAUTH_VAULT) return false;
+	return vaultPut(env, auth);
+}
+
 export async function loadBootstrap(env: Env, now: number, seed = true): Promise<StoredAuth | null> {
+	if (authSource(env) === "secret") return fallback(env);
 	if (env.OAUTH_VAULT) {
 		try {
 			const vaulted = await vaultGet(env);
@@ -129,6 +145,9 @@ export async function loadBootstrap(env: Env, now: number, seed = true): Promise
 }
 
 export async function projectToKv(env: Env, auth: StoredAuth, now: number): Promise<void> {
+	// Secret mode is intentionally immutable: do not read or mutate the vault,
+	// and do not create a second source that is ignored on the next request.
+	if (authSource(env) === "secret") return;
 	if (env.OAUTH_VAULT) {
 		if (!(await vaultPut(env, auth))) throw new Error("oauth vault unavailable");
 		return;

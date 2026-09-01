@@ -49,6 +49,37 @@ afterEach(() => {
 });
 
 describe("Codex auth store", () => {
+	it("uses OPENAI_CODEX_AUTH without reading OAUTH_VAULT when auth source is secret", async () => {
+		const kv = createKv();
+		const vaultFetch = vi.fn(async () => { throw new Error("vault must not be read"); });
+		const env = {
+			...createEnv(kv),
+			CODEX_AUTH_SOURCE: "secret",
+			OAUTH_VAULT: { idFromName: () => "default", get: () => ({ fetch: vaultFetch }) },
+			OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32)))
+		} as Env;
+
+		await expect(AuthStore.getFresh(env, Date.parse("2026-08-19T00:00:00.000Z"))).resolves.toMatchObject({
+			accessToken: "fallback-access-token",
+			accountId: "fallback-account"
+		});
+		expect(vaultFetch).not.toHaveBeenCalled();
+	});
+
+	it("keeps vault selection explicit and unchanged", async () => {
+		const kv = createKv();
+		const vaultAuth = { tokens: { ...fallbackTokens, access_token: "vault-access-token", account_id: "vault-account" }, lastRefresh: new Date().toISOString(), expiresAt: null };
+		const vaultFetch = vi.fn(async () => Response.json({ found: true, value: vaultAuth }));
+		const result = await AuthStore.getFresh({
+			...createEnv(kv),
+			CODEX_AUTH_SOURCE: "vault",
+			OAUTH_VAULT: { idFromName: () => "default", get: () => ({ fetch: vaultFetch }) },
+			OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32)))
+		} as Env, Date.now());
+		expect(result.accessToken).toBe("vault-access-token");
+		expect(vaultFetch).toHaveBeenCalled();
+	});
+
 	it("exports a deterministic AuthStore.getFresh boundary", async () => {
 		const now = new Date("2026-08-19T00:00:00.000Z").getTime();
 		const kv = createKv({

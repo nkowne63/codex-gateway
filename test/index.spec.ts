@@ -27,15 +27,16 @@ describe("OAuth integration routes", () => {
 	const bindings = {
 		KV: undefined,
 		GATEWAY_BEARER_TOKEN: "gateway-secret",
-		OPENAI_API_KEY: "client-secret",
-		OPENAI_PROVIDER: "openai-api",
+		OPENAI_API_KEY: "unused-api-key",
+		OPENAI_PROVIDER: "chatgpt-oauth",
 		CHATGPT_LOCAL_CLIENT_ID: "client-id",
 		CHATGPT_RESPONSES_URL: "unused"
 	} as typeof env;
 
 	it("mounts the login UI without embedding a gateway secret", async () => {
 		const response = await worker.fetch(new Request("https://example.com/oauth/login"), bindings, createExecutionContext());
-		expect(response.status).toBe(410);
+		expect(response.status).toBe(200);
+		expect(await response.text()).not.toContain("gateway-secret");
 	});
 
 	it("disables OAuth routes for the production API provider", async () => {
@@ -45,7 +46,22 @@ describe("OAuth integration routes", () => {
 
 	it("requires the gateway token for the login URL endpoint", async () => {
 		const response = await worker.fetch(new Request("https://example.com/oauth/login/url"), bindings, createExecutionContext());
-		expect(response.status).toBe(410);
+		expect(response.status).toBe(401);
+	});
+
+	it("reaches the login URL handler when OAuth is enabled and the bearer is valid", async () => {
+		const response = await worker.fetch(new Request("https://example.com/oauth/login/url", {
+			headers: { Authorization: "Bearer gateway-secret" }
+		}), {
+			...bindings,
+			OAUTH_LOGIN_COORDINATOR: {
+				idFromName: () => "oauth:test",
+				get: () => ({ fetch: async () => new Response(null, { status: 204 }) })
+			}
+		} as typeof env, createExecutionContext());
+		expect(response.status).toBe(200);
+		const body = await response.json<{ authorization_url: string }>();
+		expect(new URL(body.authorization_url).hostname).toBe("auth.openai.com");
 	});
 
 	it("allows only the explicitly enabled empty-vault bootstrap route", async () => {

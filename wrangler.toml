@@ -12,6 +12,8 @@ kv_namespaces = [
 # Production inference provider. The API key is a Worker secret, never committed.
 OPENAI_PROVIDER = "chatgpt-oauth"
 OPENAI_DEFAULT_MODEL = "gpt-5.6-luna"
+# Production uses the latest immutable Codex CLI secret; vault/fallback remain available per deployment.
+CODEX_AUTH_SOURCE = "secret"
 # Route inference through the private RPi fixed proxy service. Replace the
 # temporary service ID after Terraform creates the real RPi service.
 UPSTREAM_MODE = "private-origin"

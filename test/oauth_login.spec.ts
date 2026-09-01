@@ -24,7 +24,8 @@ function env(kv: ReturnType<typeof createKv>) {
 		GATEWAY_BEARER_TOKEN: "gateway-secret",
 		CHATGPT_LOCAL_CLIENT_ID: "client-id",
 		OPENAI_API_KEY: "unused",
-		CHATGPT_RESPONSES_URL: "unused"
+		CHATGPT_RESPONSES_URL: "unused",
+		CODEX_PRIVATE_ORIGIN_TOKEN: "origin-token"
 	} as unknown as Env;
 }
 
@@ -79,10 +80,12 @@ describe("OAuth login routes", () => {
 		const refreshed = await AuthStore.refresh(runtimeEnv, Date.now());
 		expect(refreshed.accessToken).toBe("rotated-access");
 		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-			expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer rotated-access");
+			expect(new Headers(init?.headers).get("X-Private-Origin-Authorization")).toBe("Bearer origin-token");
+			expect(new Headers(init?.headers).get("Authorization")).toBeNull();
+			expect(new Headers(init?.headers).get("X-ChatGPT-OAuth-Authorization")).toBe("Bearer rotated-access");
 			return new Response("data: {}\n\n", { status: 200, headers: { "Content-Type": "text/event-stream" } });
 		});
-		const result = await startUpstreamRequest({ ...runtimeEnv, OPENAI_PROVIDER: "chatgpt-oauth", UPSTREAM_MODE: "private-origin", CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin }, OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))) } as Env, "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ input: "hello", stream: true }) });
+		const result = await startUpstreamRequest({ ...runtimeEnv, OPENAI_PROVIDER: "chatgpt-oauth", UPSTREAM_MODE: "private-origin", CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin }, CODEX_PRIVATE_ORIGIN_TOKEN: "origin-token", OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))) } as Env, "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ input: "hello", stream: true }) });
 		expect(result.error).toBeNull();
 	});
 	it("rejects login start without the gateway bearer token", async () => {

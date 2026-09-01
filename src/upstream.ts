@@ -2,7 +2,7 @@ import { normalizeModelName } from "./utils";
 import { getInstructionsForModel } from "./instructions";
 import { stablePromptCacheKey } from "./cache_key";
 import { Env, InputItem, Tool } from "./types"; // Import types
-import { AuthStore } from "./auth_store";
+import { AuthStore, authFingerprint, authSource, persistSecretFallback, secretBootstrap } from "./auth_store";
 
 type ReasoningParam = {
 	effort?: string;
@@ -129,7 +129,7 @@ export async function startUpstreamRequest(
 ): Promise<{ response: Response | null; error: Response | null; alreadySse?: boolean }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
 	const privateOriginMode = env.UPSTREAM_MODE === "private-origin";
-	if (privateOriginMode && (!env.CODEX_PRIVATE_ORIGIN || (env.OPENAI_PROVIDER === "chatgpt-oauth" && (!env.OAUTH_VAULT || !env.OAUTH_VAULT_KEY)))) {
+	if (privateOriginMode && (!env.CODEX_PRIVATE_ORIGIN || !env.CODEX_PRIVATE_ORIGIN_TOKEN || (env.OPENAI_PROVIDER === "chatgpt-oauth" && authSource(env) !== "secret" && (!env.OAUTH_VAULT || !env.OAUTH_VAULT_KEY)))) {
 		return {
 			response: null,
 			error: new Response(JSON.stringify({ error: { message: "Private origin is not configured" } }), {
@@ -236,6 +236,7 @@ export async function startUpstreamRequest(
 	if (privateOriginMode) {
 		return startPrivateOriginRequest(
 			env.CODEX_PRIVATE_ORIGIN!,
+			env.CODEX_PRIVATE_ORIGIN_TOKEN!,
 			requestBody,
 			oauthAuth?.accessToken || null,
 			oauthAuth?.accountId || null,
@@ -264,18 +265,40 @@ export async function startUpstreamRequest(
 	}
 	if (isChatGptOAuth) headers["OpenAI-Beta"] = "responses=2026-02-06";
 	if (isChatGptOAuth && (env.CHATGPT_TRANSPORT || "websocket") === "websocket") {
-		return startChatGptWebSocket(requestUrl, headers, requestBody, options?.signal);
+		const websocketResult = await startChatGptWebSocket(requestUrl, headers, requestBody, options?.signal);
+		if (authSource(env) === "fallback" && websocketResult.error?.status === 401 && env.OAUTH_VAULT) {
+			const secretAuth = secretBootstrap(env);
+			if (secretAuth && authFingerprint(secretAuth) !== authFingerprint(oauthAuth!)) {
+				const fallbackHeaders = new Headers(headers);
+				fallbackHeaders.set("Authorization", `Bearer ${secretAuth.tokens.access_token}`);
+				if (secretAuth.tokens.account_id) fallbackHeaders.set("ChatGPT-Account-ID", secretAuth.tokens.account_id);
+				const fallbackResult = await startChatGptWebSocket(requestUrl, fallbackHeaders, requestBody, options?.signal);
+				if (!fallbackResult.error) await persistSecretFallback(env, secretAuth);
+				return fallbackResult;
+			}
+		}
+		return websocketResult;
 	}
 
+	const request = () => fetch(requestUrl, {
+		method: "POST",
+		headers: headers,
+		body: requestBody,
+		signal: options?.signal
+	});
 	try {
-		const upstreamResponse = await fetch(requestUrl, {
-			method: "POST",
-			headers: headers,
-			body: requestBody,
-			signal: options?.signal
-			// Cloudflare Workers fetch does not have a 'timeout' option like requests.
-			// You might need to implement a custom timeout using AbortController if necessary.
-		});
+		let upstreamResponse = await request();
+		// A stale encrypted vault may survive a local CLI re-authentication. Only a
+		// vault-selected 401 may use the immutable secret bootstrap, and only once.
+		if (isChatGptOAuth && authSource(env) === "fallback" && env.OAUTH_VAULT && upstreamResponse.status === 401) {
+			const secretAuth = secretBootstrap(env);
+			if (secretAuth && authFingerprint(secretAuth) !== authFingerprint(oauthAuth!)) {
+				headers["Authorization"] = `Bearer ${secretAuth.tokens.access_token}`;
+				if (secretAuth.tokens.account_id) headers["ChatGPT-Account-ID"] = secretAuth.tokens.account_id;
+				upstreamResponse = await request();
+				if (upstreamResponse.ok) await persistSecretFallback(env, secretAuth);
+			}
+		}
 
 		// Response received
 
@@ -316,6 +339,7 @@ export async function startUpstreamRequest(
 
 async function startPrivateOriginRequest(
 	origin: Fetcher,
+	originToken: string,
 	requestBody: string,
 	chatGptToken: string | null,
 	accountId: string | null,
@@ -325,7 +349,11 @@ async function startPrivateOriginRequest(
 		const upstreamResponse = await origin.fetch("http://127.0.0.1/v1/responses", {
 			method: "POST",
 			headers: {
-				...(chatGptToken ? { Authorization: `Bearer ${chatGptToken}` } : {}),
+				// The private-origin credential authenticates the hop to the RPi proxy;
+				// the ChatGPT credential must remain distinct and become upstream
+				// Authorization only after the proxy validates the hop credential.
+				"X-Private-Origin-Authorization": `Bearer ${originToken}`,
+				...(chatGptToken ? { "X-ChatGPT-OAuth-Authorization": `Bearer ${chatGptToken}` } : {}),
 				...(accountId ? { "ChatGPT-Account-ID": accountId } : {}),
 				"Content-Type": "application/json",
 				Accept: requestBody.includes('"stream":true') ? "text/event-stream" : "application/json"

@@ -17,6 +17,8 @@ export interface Env {
 	OAUTH_VAULT?: DurableObjectNamespace;
 	OAUTH_VAULT_KEY?: string;
 	OAUTH_BOOTSTRAP_ENABLED?: "true" | "false";
+	/** Select the OAuth credential source: secret, vault, or legacy fallback behavior. */
+	CODEX_AUTH_SOURCE?: "secret" | "vault" | "fallback";
 	GATEWAY_BEARER_TOKEN: string;
 	ACCESS_SERVICE_TOKEN_CLIENT_ID?: string;
 	ACCESS_SERVICE_TOKEN_CLIENT_SECRET?: string;
@@ -39,6 +41,7 @@ export interface Env {
 	OPENAI_DEFAULT_MODEL?: string;
 	UPSTREAM_MODE?: "private-origin";
 	CODEX_PRIVATE_ORIGIN?: Fetcher;
+	CODEX_PRIVATE_ORIGIN_TOKEN?: string;
 }
 
 export type AuthTokens = {

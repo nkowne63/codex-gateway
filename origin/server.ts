@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 const MODEL = "gpt-5.6-luna";
 type Event = { type?: string; item?: { type?: string; text?: string; content?: Array<{ text?: string }> }; response?: unknown };
@@ -25,10 +26,18 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
   return value;
 }
 
-function auth(req: IncomingMessage): boolean {
+function bearerHeader(value: string | string[] | undefined): string | null {
+  return typeof value === "string" && /^Bearer \S+$/.test(value) ? value : null;
+}
+
+function originAuth(req: IncomingMessage): boolean {
   const expected = process.env.ORIGIN_BEARER_TOKEN;
-  const value = req.headers.authorization;
+  const value = bearerHeader(req.headers.authorization);
   return Boolean(expected && value === `Bearer ${expected}`);
+}
+
+function chatGptOAuthAuthorization(req: IncomingMessage): string | null {
+  return bearerHeader(req.headers["x-chatgpt-oauth-authorization"]);
 }
 
 function eventText(event: Event): string {
@@ -41,14 +50,24 @@ export function createOriginServer(opts: { spawnFn?: typeof spawn } = {}) {
   const spawnFn = opts.spawnFn ?? spawn;
   return createServer(async (req, res) => {
     if (req.method !== "POST" || req.url !== "/v1/responses") return res.writeHead(404).end();
-    if (!auth(req)) return res.writeHead(401).end();
+    if (!originAuth(req)) return res.writeHead(401).end();
+    const chatGptAuthorization = chatGptOAuthAuthorization(req);
+    if (!chatGptAuthorization) return res.writeHead(401).end();
     let body: Record<string, unknown>;
     try { body = await readBody(req); normalizeModel(body.model); } catch (error) {
       return res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: { message: (error as Error).message } }));
     }
     const stream = body.stream === true;
     const child = spawnFn("codex", ["exec", "--skip-git-repo-check", "--ephemeral", "--json", "--model", MODEL, "-"], {
-      env: { ...process.env, HOME: process.env.CODEX_HOME ? process.env.CODEX_HOME.replace(/\/\.codex$/, "") : process.env.HOME, CODEX_HOME: process.env.CODEX_HOME },
+      env: {
+        ...process.env,
+        HOME: process.env.CODEX_HOME ? process.env.CODEX_HOME.replace(/\/\.codex$/, "") : process.env.HOME,
+        CODEX_HOME: process.env.CODEX_HOME,
+        // Keep the two bearer credentials separate at the origin boundary.
+        // The Codex CLI consumes its OAuth session from CODEX_HOME; this value
+        // is available to an upstream adapter without replacing origin auth.
+        X_CHATGPT_OAUTH_AUTHORIZATION: chatGptAuthorization,
+      },
       stdio: ["pipe", "pipe", "ignore"],
     });
     child.stdin.write(promptFrom(body)); child.stdin.end();
@@ -70,4 +89,17 @@ export function createOriginServer(opts: { spawnFn?: typeof spawn } = {}) {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) createOriginServer().listen(Number(process.env.PORT ?? 8788), "127.0.0.1");
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const args = process.argv.slice(2);
+  const argument = (name: string): string | undefined => {
+    const index = args.indexOf(name);
+    return index >= 0 ? args[index + 1] : undefined;
+  };
+  const tokenFile = argument("--token-file");
+  if (tokenFile && !process.env.ORIGIN_BEARER_TOKEN) {
+    process.env.ORIGIN_BEARER_TOKEN = readFileSync(tokenFile, "utf8").trim();
+  }
+  const bind = argument("--bind") ?? process.env.CODEX_ORIGIN_BIND ?? "127.0.0.1";
+  const port = Number(argument("--port") ?? process.env.CODEX_ORIGIN_PORT ?? process.env.PORT ?? 8788);
+  createOriginServer().listen(port, bind);
+}

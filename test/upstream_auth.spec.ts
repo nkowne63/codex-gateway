@@ -7,6 +7,7 @@ const env = (extra: Partial<Env> = {}) =>
 		OPENAI_PROVIDER: "openai-api",
 		OPENAI_API_KEY: "test-api-key",
 		CHATGPT_TRANSPORT: "http",
+		CODEX_PRIVATE_ORIGIN_TOKEN: "origin-token",
 		...extra
 	}) as Env;
 
@@ -54,7 +55,8 @@ describe("OpenAI API upstream provider", () => {
 		const result = await startUpstreamRequest(
 			 env({
 				UPSTREAM_MODE: "private-origin",
-				CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"]
+				CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"],
+				CODEX_PRIVATE_ORIGIN_TOKEN: "origin-token"
 			}),
 			"gpt-5.6",
 			[],
@@ -65,7 +67,8 @@ describe("OpenAI API upstream provider", () => {
 		expect(init?.method).toBe("POST");
 		const headers = new Headers(init?.headers);
 		expect(headers.get("Authorization")).toBeNull();
-		expect(headers.get("X-Private-Origin-Authorization")).toBeNull();
+		expect(headers.get("X-ChatGPT-OAuth-Authorization")).toBeNull();
+		expect(headers.get("X-Private-Origin-Authorization")).toBe("Bearer origin-token");
 		expect(headers.get("X-Gateway-Authorization")).toBeNull();
 		expect(JSON.parse(String(init?.body))).toEqual({
 			...payload,
@@ -287,8 +290,9 @@ describe("OpenAI API upstream provider", () => {
 	it("injects ChatGPT OAuth headers into the private origin while keeping bearer tokens distinct", async () => {
 		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
 			const headers = new Headers(init?.headers);
-			expect(headers.get("Authorization")).toBe("Bearer oauth-token");
-			expect(headers.get("X-Private-Origin-Authorization")).toBeNull();
+			expect(headers.get("Authorization")).toBeNull();
+			expect(headers.get("X-Private-Origin-Authorization")).toBe("Bearer origin-token");
+			expect(headers.get("X-ChatGPT-OAuth-Authorization")).toBe("Bearer oauth-token");
 			expect(headers.get("ChatGPT-Account-ID")).toBe("acct-redacted");
 			return new Response('data: {"type":"response.completed"}\n\n', {
 				status: 200,
@@ -300,6 +304,7 @@ describe("OpenAI API upstream provider", () => {
 				OPENAI_PROVIDER: "chatgpt-oauth",
 				UPSTREAM_MODE: "private-origin",
 				CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"],
+				CODEX_PRIVATE_ORIGIN_TOKEN: "origin-token",
 				OAUTH_VAULT: vault() as unknown as Env["OAUTH_VAULT"],
 				OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
 				OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token", account_id: "acct-redacted" } })
@@ -322,22 +327,38 @@ describe("OpenAI API upstream provider", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it("uses the VPC boundary without requiring or forwarding a private-origin token", async () => {
+	it("requires and forwards the dedicated private-origin token", async () => {
 		const privateOrigin = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
 			const headers = new Headers(init?.headers);
-			expect(headers.get("X-Private-Origin-Authorization")).toBeNull();
-			expect(headers.get("Authorization")).toBe("Bearer oauth-token");
+			expect(headers.get("Authorization")).toBeNull();
+			expect(headers.get("X-Private-Origin-Authorization")).toBe("Bearer origin-token");
+			expect(headers.get("X-ChatGPT-OAuth-Authorization")).toBe("Bearer oauth-token");
 			return new Response('data: {}\n\n', { status: 200, headers: { "Content-Type": "text/event-stream" } });
 		});
 		const result = await startUpstreamRequest(env({
 			OPENAI_PROVIDER: "chatgpt-oauth",
 			UPSTREAM_MODE: "private-origin",
 			CODEX_PRIVATE_ORIGIN: { fetch: privateOrigin } as unknown as Env["CODEX_PRIVATE_ORIGIN"],
+			CODEX_PRIVATE_ORIGIN_TOKEN: "origin-token",
 			OAUTH_VAULT: vault() as unknown as Env["OAUTH_VAULT"],
 			OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
 			OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token" } })
 		}), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ input: "hello", stream: true }) });
 		expect(result.error).toBeNull();
+	});
+
+	it("fails closed when the private-origin token is missing", async () => {
+		const origin = vi.fn();
+		const result = await startUpstreamRequest(env({
+			UPSTREAM_MODE: "private-origin",
+			CODEX_PRIVATE_ORIGIN: { fetch: origin } as unknown as Env["CODEX_PRIVATE_ORIGIN"],
+			CODEX_PRIVATE_ORIGIN_TOKEN: undefined,
+			OAUTH_VAULT: vault() as unknown as Env["OAUTH_VAULT"],
+			OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
+			OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "oauth-token" } })
+		}), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ input: "hello" }) });
+		expect(result.error?.status).toBe(503);
+		expect(origin).not.toHaveBeenCalled();
 	});
 
 	it("rejects private-origin production mode when the OAuth vault binding is absent", async () => {
@@ -468,6 +489,37 @@ describe("OpenAI API upstream provider", () => {
 		expect(result.response).toBeNull();
 		expect(result.error?.status).toBe(status);
 		expect(await result.error?.text()).not.toContain("upstream secret body");
+	});
+
+	it("falls back once from a stale vault during a WS handshake and persists the secret credential", async () => {
+		let stored = { tokens: { access_token: "vault-token", account_id: "acct" }, lastRefresh: new Date().toISOString(), expiresAt: null };
+		const put = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			stored = JSON.parse(String(init?.body)) as typeof stored;
+			return new Response(null, { status: 204 });
+		});
+		const vaultBinding = { idFromName: () => "default", get: () => ({ fetch: async (input: RequestInfo | URL, init?: RequestInit) => init?.method === "PUT" ? put(input, init) : Response.json({ found: true, value: stored }) }) };
+		const { socket } = websocketFixture();
+		const upstream = vi.fn(async (_url: string, init?: RequestInit) => {
+			const authorization = new Headers(init?.headers).get("Authorization");
+			if (authorization === "Bearer secret-token") {
+				const response = new Response(null, { status: 200 });
+				Object.defineProperty(response, "webSocket", { value: socket });
+				return response;
+			}
+			return new Response("denied", { status: 401 });
+		});
+		vi.stubGlobal("fetch", upstream);
+		const result = await startUpstreamRequest(env({
+			OPENAI_PROVIDER: "chatgpt-oauth",
+			CHATGPT_TRANSPORT: "websocket",
+			OAUTH_VAULT: vaultBinding as unknown as Env["OAUTH_VAULT"],
+			OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
+			OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "secret-token", account_id: "acct" } })
+		}), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ input: "hello" }) });
+		expect(result.error).toBeNull();
+		expect(upstream).toHaveBeenCalledTimes(2);
+		expect(put).toHaveBeenCalledTimes(2);
+		expect(stored.tokens.access_token).toBe("secret-token");
 	});
 
 	it("connects to the ChatGPT Codex upstream and proxies its response", async () => {
@@ -651,5 +703,35 @@ describe("OpenAI API upstream provider", () => {
 		const result = await startUpstreamRequest(env({ OPENAI_PROVIDER: undefined }), "gpt-5.6", []);
 		expect(result.response).toBeNull();
 		expect(result.error?.status).toBe(503);
+	});
+
+	it("falls back once from a stale vault to the secret and persists on success", async () => {
+		let stored = { tokens: { access_token: "vault-token", account_id: "acct" }, lastRefresh: new Date().toISOString(), expiresAt: null };
+		const put = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => { stored = JSON.parse(String(init?.body)) as typeof stored; return new Response(null, { status: 204 }); });
+		const vaultBinding = { idFromName: () => "default", get: () => ({ fetch: async (input: RequestInfo | URL, init?: RequestInit) => init?.method === "PUT" ? put(input, init) : Response.json({ found: true, value: stored }) }) };
+		const upstream = vi.fn(async (_url: string, init?: RequestInit) =>
+			new Response("", { status: new Headers(init?.headers).get("Authorization") === "Bearer secret-token" ? 200 : 401 })
+		);
+		vi.stubGlobal("fetch", upstream);
+		const result = await startUpstreamRequest(env({ CODEX_AUTH_SOURCE: "fallback", OPENAI_PROVIDER: "chatgpt-oauth", CHATGPT_TRANSPORT: "http", OAUTH_VAULT: vaultBinding as unknown as Env["OAUTH_VAULT"], OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))), OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "secret-token", account_id: "acct" } }) }), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ input: "hello" }) });
+		expect(result.error).toBeNull();
+		expect(upstream).toHaveBeenCalledTimes(2);
+		expect(put).toHaveBeenCalledTimes(2);
+		expect(stored.tokens.access_token).toBe("secret-token");
+	});
+
+	it("tries the secret once and fails safely when both vault and secret fail", async () => {
+		const upstream = vi.fn(async () => new Response("", { status: 401 }));
+		vi.stubGlobal("fetch", upstream);
+		const result = await startUpstreamRequest(env({ OPENAI_PROVIDER: "chatgpt-oauth", CHATGPT_TRANSPORT: "http", OAUTH_VAULT: vault() as unknown as Env["OAUTH_VAULT"], OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))), OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "different-token" } }) }), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ input: "hello" }) });
+		expect(result.error?.status).toBe(401);
+		expect(upstream).toHaveBeenCalledTimes(2);
+	});
+
+	it.each([403, 429, 500])("does not fallback for non-401 status %s", async (status) => {
+		const upstream = vi.fn(async () => new Response("", { status }));
+		vi.stubGlobal("fetch", upstream);
+		await startUpstreamRequest(env({ OPENAI_PROVIDER: "chatgpt-oauth", CHATGPT_TRANSPORT: "http", OAUTH_VAULT: vault() as unknown as Env["OAUTH_VAULT"], OAUTH_VAULT_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))), OPENAI_CODEX_AUTH: JSON.stringify({ tokens: { access_token: "different-token" } }) }), "gpt-5.6", [], { rawResponsesBody: JSON.stringify({ input: "hello" }) });
+		expect(upstream).toHaveBeenCalledTimes(1);
 	});
 });
